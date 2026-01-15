@@ -1,18 +1,277 @@
 {
-    "version": 1,
-    "updated_at": "2025-01-01T00:00:00",
-    "materials": {
-        "POM Valge": {
-            "enabled": true,
-            "stock_m3": 0.00,
-            "remain_m3": 0.00
-        },
-        "POM Must": {
-            "enabled": true,
-            "stock_m3": 0.00,
-            "remain_m3": 0.00
-        }
+  "materials": {
+    "POM Valge": {
+      "enabled": true,
+      "stock_m3": 0.0,
+      "remain_m3": 37.44
     },
-    "ledger": [],
-    "processed_docs": []
+    "POM Must": {
+      "enabled": true,
+      "stock_m3": 0.0,
+      "remain_m3": 19.23
     }
+  },
+  "ledger": [
+    {
+      "ts": "2025-09-02T10:16:29",
+      "month": "2025-09",
+      "material": "POM Valge",
+      "type": "manual_sub",
+      "amount_m2": 20.0,
+      "note": "Ручная операция"
+    },
+    {
+      "ts": "2025-09-02T10:16:44",
+      "month": "2025-09",
+      "material": "POM Valge",
+      "type": "manual_add",
+      "amount_m2": 20.0,
+      "note": "Ручная операция"
+    },
+    {
+      "ts": "2025-09-02T10:16:45",
+      "month": "2025-09",
+      "material": "POM Valge",
+      "type": "manual_add",
+      "amount_m2": 20.0,
+      "note": "Ручная операция"
+    },
+    {
+      "ts": "2025-09-02T10:32:05",
+      "month": "2025-09",
+      "material": "POM Valge",
+      "type": "manual_add",
+      "amount_m2": 20.0,
+      "note": "Ручная операция"
+    },
+    {
+      "ts": "2025-09-02T10:37:03",
+      "month": "2025-09",
+      "material": "POM Valge",
+      "type": "manual_add",
+      "amount_m2": 20.0,
+      "note": "Ручная операция"
+    },
+    {
+      "ts": "2025-09-02T10:39:28",
+      "month": "2025-09",
+      "material": "POM Valge",
+      "type": "manual_sub",
+      "amount_m2": 60.0,
+      "note": "Ручная операция"
+    },
+    {
+      "ts": "2025-09-02T10:52:17",
+      "month": "2025-09",
+      "material": "POM Valge",
+      "type": "manual_add",
+      "amount_m2": 60.0,
+      "note": "Undo выбранной записи (Списание)"
+    },
+    {
+      "ts": "2025-09-02T10:52:24",
+      "month": "2025-09",
+      "material": "POM Valge",
+      "type": "manual_add",
+      "amount_m2": 60.0,
+      "note": "Undo выбранной записи (Списание)"
+    },
+    {
+      "ts": "2025-09-02T10:52:27",
+      "month": "2025-09",
+      "material": "POM Valge",
+      "type": "manual_add",
+      "amount_m2": 60.0,
+      "note": "Undo выбранной записи (Списание)"
+    },
+    {
+      "ts": "2025-09-02T10:52:30",
+      "month": "2025-09",
+      "material": "POM Valge",
+      "type": "manual_sub",
+      "amount_m2": 20.0,
+      "note": "Undo выбранной записи (Пополнение)"
+    },
+    {
+      "ts": "2025-09-02T11:49:41",
+      "month": "2025-09",
+      "material": "POM Valge",
+      "type": "manual_add",
+      "amount_m2": 20.0,
+      "note": "Ручная операция"
+    },
+    {
+      "ts": "2025-09-02T11:52:33",
+      "month": "2025-09",
+      "material": "POM Must",
+      "type": "manual_add",
+      "amount_m2": 20.0,
+      "note": "Ручная операция"
+    },
+    {
+      "ts": "2025-09-02T11:57:44",
+      "month": "2025-09",
+      "material": "POM Valge",
+      "type": "manual_sub",
+      "amount_m2": 20.0,
+      "note": "Undo выбранной записи (Пополнение)"
+    },
+    {
+      "ts": "2025-09-02T11:57:51",
+      "month": "2025-09",
+      "material": "POM Must",
+      "type": "manual_sub",
+      "amount_m2": 20.0,
+      "note": "Undo выбранной записи (Пополнение)"
+    },
+    {
+      "ts": "2025-09-02T11:58:09",
+      "month": "2025-09",
+      "material": "POM Valge",
+      "type": "manual_sub",
+      "amount_m2": 160.0,
+      "note": "Ручная операция"
+    },
+    {
+      "ts": "2025-09-02T12:18:51",
+      "month": "2025-09",
+      "material": "POM Valge",
+      "type": "manual_add",
+      "amount_m2": 20.0,
+      "note": "Ручная операция"
+    },
+    {
+      "ts": "2025-09-02T12:18:54",
+      "month": "2025-09",
+      "material": "POM Must",
+      "type": "manual_add",
+      "amount_m2": 20.0,
+      "note": "Ручная операция"
+    },
+    {
+      "ts": "2025-09-02T14:52:04",
+      "month": "2025-09",
+      "material": "POM Valge",
+      "type": "manual_sub",
+      "amount_m2": 20.0,
+      "note": "Undo выбранной записи (Пополнение)"
+    },
+    {
+      "ts": "2025-09-02T14:52:06",
+      "month": "2025-09",
+      "material": "POM Must",
+      "type": "manual_sub",
+      "amount_m2": 20.0,
+      "note": "Undo выбранной записи (Пополнение)"
+    },
+    {
+      "ts": "2025-09-02T14:52:32",
+      "month": "2025-08",
+      "material": "POM Valge",
+      "type": "manual_add",
+      "amount_m2": 20.0,
+      "note": "Ручная операция"
+    },
+    {
+      "ts": "2025-09-02T14:52:35",
+      "month": "2025-08",
+      "material": "POM Must",
+      "type": "manual_add",
+      "amount_m2": 20.0,
+      "note": "Ручная операция"
+    },
+    {
+      "ts": "2025-09-03T09:52:31",
+      "month": "2025-07",
+      "material": "POM Valge",
+      "type": "month_calc",
+      "amount_m2": 1.78,
+      "note": "Авто: расчёт 2025-07"
+    },
+    {
+      "ts": "2025-09-03T09:52:31",
+      "month": "2025-07",
+      "material": "POM Must",
+      "type": "month_calc",
+      "amount_m2": 0.11,
+      "note": "Авто: расчёт 2025-07"
+    },
+    {
+      "ts": "2025-09-03T09:52:35",
+      "month": "2025-06",
+      "material": "POM Valge",
+      "type": "month_calc",
+      "amount_m2": 0.38,
+      "note": "Авто: расчёт 2025-06"
+    },
+    {
+      "ts": "2025-09-03T09:52:35",
+      "month": "2025-06",
+      "material": "POM Must",
+      "type": "month_calc",
+      "amount_m2": 0.18,
+      "note": "Авто: расчёт 2025-06"
+    },
+    {
+      "ts": "2025-09-04T11:48:57",
+      "month": "2025-09",
+      "material": "POM Valge",
+      "type": "manual_add",
+      "amount_m2": 20.0,
+      "note": "Käsitsi toiming"
+    },
+    {
+      "ts": "2025-09-04T11:49:03",
+      "month": "2025-09",
+      "material": "POM Valge",
+      "type": "manual_sub",
+      "amount_m2": 20.0,
+      "note": "Käsitsi toiming"
+    },
+    {
+      "ts": "2025-09-04T11:49:15",
+      "month": "2025-09",
+      "material": "POM Valge",
+      "type": "manual_add",
+      "amount_m2": 20.0,
+      "note": "Valitud kirje tühistamine (Mahakandmine)"
+    },
+    {
+      "ts": "2025-09-04T11:51:55",
+      "month": "2025-09",
+      "material": "POM Valge",
+      "type": "manual_add",
+      "amount_m2": 20.0,
+      "note": "Valitud kirje tühistamine (Mahakandmine)"
+    },
+    {
+      "ts": "2025-09-04T11:52:08",
+      "month": "2025-09",
+      "material": "POM Valge",
+      "type": "manual_sub",
+      "amount_m2": 20.0,
+      "note": "Valitud kirje tühistamine (Täiendus)"
+    },
+    {
+      "ts": "2025-09-04T11:52:13",
+      "month": "2025-05",
+      "material": "POM Valge",
+      "type": "month_calc",
+      "amount_m2": 0.4,
+      "note": "Auto: kuu 2025-05 arvestus"
+    },
+    {
+      "ts": "2025-09-04T11:52:13",
+      "month": "2025-05",
+      "material": "POM Must",
+      "type": "month_calc",
+      "amount_m2": 0.48,
+      "note": "Auto: kuu 2025-05 arvestus"
+    }
+  ],
+  "closed_months": [
+    "2025-07",
+    "2025-06",
+    "2025-05"
+  ]
+}

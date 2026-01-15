@@ -1,5 +1,5 @@
 
-
+import os
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from datetime import datetime
@@ -16,7 +16,7 @@ class MainWindow(tk.Frame):
         self.master: tk.Tk = master
         self.year_var = tk.StringVar()
         self.month_num_var = tk.StringVar()
-        self.status_var = tk.StringVar(value="Готово")
+        self.status_var = tk.StringVar(value="Valmis")
         # Толщина пилы (мм) — влияет на конвертацию в м²
         self.kerf_mm_var = tk.StringVar(value="0.00")
         # При изменении значения пересчитываем конвертацию
@@ -31,23 +31,34 @@ class MainWindow(tk.Frame):
         self.material_rows = []      # сюда позже положим строки из PDF-парсера
 
 
-        # --- пути и состояние ---
-        # <корень проекта> = ../../../.. от этого файла
-        self.project_root = Path(__file__).resolve().parents[4]
-        self.state_dir = self.project_root / "state"
+            # --- пути и состояние ---
+        # База состояния: %APPDATA%\Kumex
+        appdata = Path(os.getenv("APPDATA") or Path.home() / "AppData" / "Roaming")
+        self.state_dir = appdata / "Kumex"
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+
+        # Папка по умолчанию для PDF внутри APPDATA (можно менять в GUI)
+        (self.state_dir / "input_pdf").mkdir(parents=True, exist_ok=True)
+
         self.config_path = self.state_dir / "kumex_config.json"
-        # kumex_stock.json → загрузка материалов
         self.stock_path = self.state_dir / "kumex_stock.json"
         stock_data = load_json(self.stock_path, default={"materials": {}})
 
-            # Оставляем в интерфейсе только два материала
+        # Оставляем в интерфейсе только два материала
         allowed = {"POM Valge", "POM Must"}
         mats = stock_data.get("materials", {})
         filtered = {k: v for k, v in mats.items() if k in allowed}
-        # если JSON содержит лишние материалы — очистим и сохраним
         if filtered != mats:
             stock_data["materials"] = filtered
             save_json(self.stock_path, stock_data)
+        if not stock_data["materials"]:
+            stock_data["materials"] = {
+                "POM Valge": {"enabled": True, "stock_m3": 0.0, "remain_m3": 0.0},
+                "POM Must":  {"enabled": True, "stock_m3": 0.0, "remain_m3": 0.0}
+            }
+            save_json(self.stock_path, stock_data)
+
+            
         # если вообще пусто — создадим по умолчанию
         if not stock_data["materials"]:
             stock_data["materials"] = {
@@ -122,15 +133,15 @@ class MainWindow(tk.Frame):
         cb_year.bind("<<ComboboxSelected>>", self._on_date_change)
 
         # Ряд 2: Папка PDF
-        ttk.Label(container, text="Папка PDF:").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(container, text="PDF kaust:").grid(row=2, column=0, sticky="w", pady=(8, 0))
         pdf_entry = ttk.Entry(container, textvariable=self.pdf_dir_var, width=60)
         pdf_entry.grid(row=2, column=1, sticky="we", pady=(8, 0))
-        choose_btn = ttk.Button(container, text="Выбрать…", command=self._choose_pdf_dir)
+        choose_btn = ttk.Button(container, text="Vali…", command=self._choose_pdf_dir)
         choose_btn.grid(row=2, column=2, sticky="w", padx=(8, 0), pady=(8, 0))
 
         # Ряд 3: чекбокс "сделать по умолчанию"
         default_cb = ttk.Checkbutton(
-            container, text="Сделать по умолчанию", variable=self.make_default_var
+            container, text="Määra vaikimisi", variable=self.make_default_var
         )
         default_cb.grid(row=3, column=1, sticky="w", pady=(4, 12))
 
@@ -144,12 +155,12 @@ class MainWindow(tk.Frame):
         lists_frame.rowconfigure(1, weight=1)
 
         # Левая панель — PDF
-        pdf_group = ttk.LabelFrame(lists_frame, text="PDF-файлы (фильтр по месяцу)")
+        pdf_group = ttk.LabelFrame(lists_frame, text="PDF-failid (filtreeritud kuu järgi)")
         pdf_group.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         pdf_group.columnconfigure(0, weight=1)
         pdf_group.rowconfigure(1, weight=1)
 
-        self.pdf_count_lbl = ttk.Label(pdf_group, text="Найдено: 0")
+        self.pdf_count_lbl = ttk.Label(pdf_group, text="Leitud: 0")
         self.pdf_count_lbl.grid(row=0, column=0, sticky="w", padx=8, pady=(4, 0))
 
         self.pdf_list = tk.Listbox(pdf_group, height=12)
@@ -159,12 +170,12 @@ class MainWindow(tk.Frame):
         pdf_scroll.grid(row=1, column=1, sticky="ns", pady=8)
 
         # Правая панель — Материалы из PDF (позже заполним реальным парсером)
-        mat_group = ttk.LabelFrame(lists_frame, text="Перечень заказного материала (по выбранному месяцу)")
+        mat_group = ttk.LabelFrame(lists_frame, text="Tellitud materjalide loetelu (valitud kuu järgi)")
         mat_group.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
         mat_group.columnconfigure(0, weight=1)
         mat_group.rowconfigure(1, weight=1)
 
-        self.mat_count_lbl = ttk.Label(mat_group, text="Позиций: 0")
+        self.mat_count_lbl = ttk.Label(mat_group, text="Positsioone: 0")
         self.mat_count_lbl.grid(row=0, column=0, sticky="w", padx=8, pady=(4, 0))
 
         # Таблица материалов
@@ -193,14 +204,14 @@ class MainWindow(tk.Frame):
         bottom_frame.columnconfigure(1, weight=1)  # правая широкая колонка
 
         # Левая группа (под левым списком): настройки склада Kumex
-        cfg_group = ttk.LabelFrame(bottom_frame, text="Склад Kumex — материалы для учёта (м²)")
+        cfg_group = ttk.LabelFrame(bottom_frame, text="Kumex ladu — materjalide arvestus (m²)")
         cfg_group.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         for c in range(4):
             cfg_group.columnconfigure(c, weight=0)
 
         # Заголовки
-        ttk.Label(cfg_group, text="Материал").grid(row=0, column=0, padx=8, pady=(6, 2), sticky="w")
-        ttk.Label(cfg_group, text="Остаток, м²").grid(row=0, column=3, padx=8, pady=(6, 2), sticky="w")
+        ttk.Label(cfg_group, text="Materjal").grid(row=0, column=0, padx=8, pady=(6, 2), sticky="w")
+        ttk.Label(cfg_group, text="Jääk, m²").grid(row=0, column=3, padx=8, pady=(6, 2), sticky="w")
 
         # Ряды по материалам
         # Ряды по материалам ИЗ JSON (с сохранением флага enabled)
@@ -218,10 +229,10 @@ class MainWindow(tk.Frame):
         btn_row = ttk.Frame(cfg_group)
         btn_row.grid(row=_row, column=0, columnspan=3, sticky="ew", padx=8, pady=(8, 6))
         btn_row.columnconfigure(0, weight=1)
-        ttk.Button(btn_row, text="Настройка склада…", command=self._open_stock_dialog).pack(anchor="center")
+        ttk.Button(btn_row, text="Lao seaded……", command=self._open_stock_dialog).pack(anchor="center")
 
 
-        conv_group = ttk.LabelFrame(bottom_frame, text="Конвертация (по выбранному месяцу)")
+        conv_group = ttk.LabelFrame(bottom_frame, text="Konverteerimine (valitud kuu järgi)")
         conv_group.grid(row=0, column=1, sticky="nsew")
         # 0: имя материала, 1: значение, 2: "м²", 3: спейсер для растяжения
         conv_group.columnconfigure(0, weight=0)
@@ -245,7 +256,7 @@ class MainWindow(tk.Frame):
                 row=_row_conv, column=1, padx=(8, 2), pady=pad_top, sticky="w"
             )
             # "м²" почти вплотную к полю
-            ttk.Label(conv_group, text="м²").grid(
+            ttk.Label(conv_group, text="m²").grid(
                 row=_row_conv, column=2, padx=(0, 8), pady=pad_top, sticky="w"
             )
 
@@ -256,7 +267,7 @@ class MainWindow(tk.Frame):
             row=_row_conv, column=0, columnspan=3, sticky="ew", padx=8, pady=(6, 4)
         )
 
-        ttk.Label(conv_group, text="Толщина пилы:").grid(
+        ttk.Label(conv_group, text="Saetera paksus:").grid(
             row=_row_conv + 1, column=0, padx=8, pady=2, sticky="w"
         )
         e_kerf = ttk.Entry(conv_group, textvariable=self.kerf_mm_var, width=6)
@@ -267,12 +278,12 @@ class MainWindow(tk.Frame):
         e_kerf.bind("<FocusOut>", lambda _e: self._save_config())
         e_kerf.bind("<Return>",  lambda _e: (self._save_config(), "break"))
 
-        ttk.Label(conv_group, text="мм").grid(
+        ttk.Label(conv_group, text="mm").grid(
             row=_row_conv + 1, column=2, padx=(0, 8), pady=2, sticky="w"
         )
 
                 # Кнопка "Рассчитать" внутри рамки конвертации, снизу справа
-        calc_btn = ttk.Button(conv_group, text="Рассчитать", command=self._apply_stub)
+        calc_btn = ttk.Button(conv_group, text="Arvuta", command=self._apply_stub)
         calc_btn.grid(row=_row_conv + 2, column=0, columnspan=3, sticky="e", padx=8, pady=(10, 6))
         self._calc_btn = calc_btn  # пригодится позже, когда будем блокировать закрытые месяцы
 
@@ -306,7 +317,7 @@ class MainWindow(tk.Frame):
         self.kerf_mm_var.set(str(cfg.get("kerf_mm", self.kerf_mm_var.get() or "1")))
 
         # Папка PDF: по умолчанию data/input_pdf
-        default_pdf_dir = (self.project_root / "data" / "input_pdf").as_posix()
+        default_pdf_dir = (self.state_dir / "input_pdf").as_posix()
         self.pdf_dir_var.set(cfg.get("pdf_dir", default_pdf_dir))
 
     def _save_config(self):
@@ -319,27 +330,27 @@ class MainWindow(tk.Frame):
         # ---------------- Служебные обработчики ----------------
 
     def _choose_pdf_dir(self):
-        initial = self.pdf_dir_var.get() or (self.project_root / "data" / "input_pdf").as_posix()
+        initial = self.pdf_dir_var.get() or (self.state_dir / "input_pdf").as_posix()
         chosen = filedialog.askdirectory(initialdir=initial, title="Выбрать папку с PDF")
         if chosen:
             self.pdf_dir_var.set(Path(chosen).as_posix())
             # Если стоит чекбокс — сразу записываем как дефолт (минимальная логика)
             if self.make_default_var.get():
                 self._save_config()
-                messagebox.showinfo("Kumex", "Папка сохранена как путь по умолчанию.")
+                messagebox.showinfo("Kumex", "Kaust salvestatud vaikimisi teeks.")
 
     def _scan_pdfs(self):
     
         folder = Path(self.pdf_dir_var.get()).expanduser()
         if not folder.exists():
-            messagebox.showerror("Папка недоступна", f"Папка не существует:\n{folder}")
+            messagebox.showerror("Kaust pole kättesaadav", f"Kausta ei eksisteeri:\n{folder}")
             return
 
         # читаем год/месяц из комбобоксов
         yy_str = self.year_var.get().strip()
         mm_str = self.month_num_var.get().strip()
         if not (yy_str.isdigit() and mm_str.isdigit()):
-            messagebox.showerror("Неверная дата", f"Ожидается формат YYYY-MM, получено: {yy_str}-{mm_str}")
+            messagebox.showerror("Vale kuupäev", f"Oodatud formaat YYYY-MM, saadi: {yy_str}-{mm_str}")
             return
         yy = int(yy_str)
         mm = int(mm_str)
@@ -366,17 +377,17 @@ class MainWindow(tk.Frame):
         self.pdf_list.delete(0, tk.END)
         for p in self.pdf_files:
             self.pdf_list.insert(tk.END, p.name)
-        self.pdf_count_lbl.config(text=f"Найдено: {len(self.pdf_files)}")
+        self.pdf_count_lbl.config(text=f"Leitud: {len(self.pdf_files)}")
 
         # чистим правый список (материалы добавим позже)
         self.material_rows = []
         for iid in self.mat_tree.get_children():
             self.mat_tree.delete(iid)
-        self.mat_count_lbl.config(text="Позиций: 0")
+        self.mat_count_lbl.config(text="Positsioone: 0")
         
         self._parse_materials()
 
-        self._set_status(f"Папка: {folder} | PDF за {yy}-{mm_str}: {len(self.pdf_files)}")
+        self._set_status(f"Kaust: {folder} | PDF kuu {yy}-{mm_str}: {len(self.pdf_files)}")
         self._calc_m2()
         self._update_calc_button_state()
 
@@ -388,8 +399,8 @@ class MainWindow(tk.Frame):
         self.material_rows = []
 
         if not self.pdf_files:
-            self._set_status("Сначала нажмите «Сканировать PDF».")
-            self.mat_count_lbl.config(text="Позиций: 0")
+            self._set_status("Kõigepealt vajutage „Skaneeri PDF“.")
+            self.mat_count_lbl.config(text="Positsioone: 0")
             return
 
         # --- паттерны ---
@@ -472,12 +483,13 @@ class MainWindow(tk.Frame):
                     "date": od,
                     "material": mat_name
                 })
+                
                 # добавляем строку в таблицу
                 self.mat_tree.insert("", "end", values=(desc, qty, po, od))
                 total += 1
 
-        self.mat_count_lbl.config(text=f"Позиций: {total}")
-        self._set_status(f"Разобрано PDF: {len(self.pdf_files)} | Найдено позиций: {total}")
+        self.mat_count_lbl.config(text=f"Positsioone: {total}")
+        self._set_status(f"Töödeldud PDF: {len(self.pdf_files)} | Leitud positsioone: {total}")
 
     def _on_date_change(self, *_):
         self._sync_month_var()
@@ -486,7 +498,7 @@ class MainWindow(tk.Frame):
 
     def _report_stub(self):
         # Заглушка: здесь позже будет агрегатор + генерация отчёта
-        messagebox.showinfo("Отчёт", "Формирование отчёта (заглушка).")
+        messagebox.showinfo("Aruanne", "Aruande koostamine (kohatäide)")
 
     def _sync_month_var(self):
         yy = self.year_var.get()
@@ -495,7 +507,7 @@ class MainWindow(tk.Frame):
             self.month_var.set(f"{yy}-{mm}")
 
     def _calc_m2(self):
-        """Пересчитывает площади (м²) по материалам на основе таблицы заказов."""
+        """Пересчитывает площади (m²) по материалам на основе таблицы заказов."""
         import re
         from decimal import Decimal, ROUND_HALF_UP
 
@@ -573,7 +585,7 @@ class MainWindow(tk.Frame):
 
         self._stock_win = tk.Toplevel(self.master)
         self._stock_win.withdraw()  # спрятать до настройки
-        self._stock_win.title("Настройка склада")
+        self._stock_win.title("Lao seaded… ")
         self._stock_win.transient(self.master)
         self._stock_win.grab_set()
         self._stock_win.geometry("720x420")
@@ -593,7 +605,7 @@ class MainWindow(tk.Frame):
         frm.pack(fill="both", expand=True, padx=10, pady=10)
 
         # ===== ФОРМА ОПЕРАЦИИ (+/- м²) =====
-        op_box = ttk.LabelFrame(frm, text="Операция со складом")
+        op_box = ttk.LabelFrame(frm, text="Lao toiming")
         op_box.pack(fill="x", padx=0, pady=(0, 8))
 
         # переменные формы
@@ -601,27 +613,27 @@ class MainWindow(tk.Frame):
         self._op_amount = tk.StringVar(value="0.00")
         self._op_type = tk.StringVar(value="add")  # add | sub
 
-        ttk.Label(op_box, text="Материал:").grid(row=0, column=0, padx=8, pady=6, sticky="w")
+        ttk.Label(op_box, text="Materjal:").grid(row=0, column=0, padx=8, pady=6, sticky="w")
         ttk.Combobox(op_box, textvariable=self._op_material, state="readonly",
                     values=("POM Valge", "POM Must"), width=12).grid(row=0, column=1, padx=(0, 8), pady=6, sticky="w")
 
-        ttk.Label(op_box, text="Количество:").grid(row=0, column=2, padx=8, pady=6, sticky="w")
+        ttk.Label(op_box, text="Kogus:").grid(row=0, column=2, padx=8, pady=6, sticky="w")
         ttk.Entry(op_box, textvariable=self._op_amount, width=10).grid(row=0, column=3, padx=(0, 4), pady=6, sticky="w")
-        ttk.Label(op_box, text="м²").grid(row=0, column=4, padx=(0, 8), pady=6, sticky="w")
+        ttk.Label(op_box, text="m²").grid(row=0, column=4, padx=(0, 8), pady=6, sticky="w")
 
         # --- НОВАЯ строка под материалом/количеством ---
-        ttk.Label(op_box, text="Тип действия:").grid(row=1, column=0, padx=8, pady=(0, 6), sticky="w")
+        ttk.Label(op_box, text="Toimingu tüüp:").grid(row=1, column=0, padx=8, pady=(0, 6), sticky="w")
 
-        ttk.Radiobutton(op_box, text="+ Пополнение", variable=self._op_type, value="add")\
+        ttk.Radiobutton(op_box, text="+ Täiendus", variable=self._op_type, value="add")\
         .grid(row=1, column=1, padx=(0, 8), pady=(0, 6), sticky="w")
 
-        ttk.Radiobutton(op_box, text="– Списание", variable=self._op_type, value="sub")\
+        ttk.Radiobutton(op_box, text="– Mahakandmine", variable=self._op_type, value="sub")\
         .grid(row=1, column=2, padx=(0, 8), pady=(0, 6), sticky="w")
 
         # даём пространство между радиокнопками и кнопкой (колонка 3 будет растягиваться)
         op_box.columnconfigure(3, weight=1)
 
-        ttk.Button(op_box, text="Добавить операцию", command=self._add_stock_operation)\
+        ttk.Button(op_box, text="Lisa toiming", command=self._add_stock_operation)\
         .grid(row=1, column=4, padx=8, pady=(0, 6), sticky="e")
 # --- конец новой строки ---
 
@@ -633,20 +645,20 @@ class MainWindow(tk.Frame):
         # чтобы поле комментария имело место
 
         # ===== УДАЛЕНИЕ РАСЧЁТА МЕСЯЦА =====
-        rm_box = ttk.LabelFrame(frm, text="Удалить расчёт месяца (month_calc)")
+        rm_box = ttk.LabelFrame(frm, text="Kustuta kuu arvestus (month_calc)")
         rm_box.pack(fill="x", padx=0, pady=(0, 8))
 
         self._rm_year = tk.StringVar(value=self.year_var.get())
         self._rm_month = tk.StringVar(value=self.month_num_var.get())
 
-        ttk.Label(rm_box, text="Год:").grid(row=0, column=0, padx=8, pady=6, sticky="w")
+        ttk.Label(rm_box, text="Aasta:").grid(row=0, column=0, padx=8, pady=6, sticky="w")
         ttk.Combobox(rm_box, textvariable=self._rm_year, values=[str(y) for y in range(2017, 2031)],
                     state="readonly", width=6).grid(row=0, column=1, padx=(0, 8), pady=6, sticky="w")
-        ttk.Label(rm_box, text="Месяц:").grid(row=0, column=2, padx=8, pady=6, sticky="w")
+        ttk.Label(rm_box, text="Kuu:").grid(row=0, column=2, padx=8, pady=6, sticky="w")
         ttk.Combobox(rm_box, textvariable=self._rm_month, values=[f"{m:02d}" for m in range(1, 13)],
                     state="readonly", width=4).grid(row=0, column=3, padx=(0, 8), pady=6, sticky="w")
 
-        ttk.Button(rm_box, text="Удалить расчёт месяца", command=self._delete_month_calc)\
+        ttk.Button(rm_box, text="Kustuta kuu arvestus", command=self._delete_month_calc)\
             .grid(row=0, column=4, padx=8, pady=6, sticky="e")
 
         rm_box.columnconfigure(5, weight=1)
@@ -654,19 +666,19 @@ class MainWindow(tk.Frame):
         # ===== ЖУРНАЛ ОПЕРАЦИЙ =====
         topbar = ttk.Frame(frm)
         topbar.pack(fill="x", pady=(6, 0))
-        ttk.Label(topbar, text="Журнал операций склада").pack(side="left")
+        ttk.Label(topbar, text="Lao toimingute logi").pack(side="left")
 
         # Кнопка Undo (отмена выбранной записи)
-        ttk.Button(topbar, text="Отменить действие", command=self._undo_selected).pack(side="right", padx=(4, 0))
+        ttk.Button(topbar, text="Tühista toiming", command=self._undo_selected).pack(side="right", padx=(4, 0))
 
         cols = ("ts", "month", "material", "action", "amount", "note")
         self._ledger_tree = ttk.Treeview(frm, columns=cols, show="headings", height=12)
-        self._ledger_tree.heading("ts", text="Дата/время")
-        self._ledger_tree.heading("month", text="Месяц")
-        self._ledger_tree.heading("material", text="Материал")
-        self._ledger_tree.heading("action", text="Действие")
-        self._ledger_tree.heading("amount", text="м²")
-        self._ledger_tree.heading("note", text="Комментарий")
+        self._ledger_tree.heading("ts", text="Kuupäev/aeg")
+        self._ledger_tree.heading("month", text="Kuu")
+        self._ledger_tree.heading("material", text="Materjal")
+        self._ledger_tree.heading("action", text="Toiming")
+        self._ledger_tree.heading("amount", text="m²")
+        self._ledger_tree.heading("note", text="Kommentaar")
 
         self._ledger_tree.column("ts", width=140, anchor="center")
         self._ledger_tree.column("month", width=80, anchor="center")
@@ -767,20 +779,20 @@ class MainWindow(tk.Frame):
         mat = self._op_material.get()
         raw = str(self._op_amount.get()).replace(",", ".").strip()
         typ = self._op_type.get()  # add | sub
-        note = "Ручная операция"
+        note = "Käsitsi toiming"
 
 
         # валидация
         try:
             amount = Decimal(raw)
         except Exception:
-            messagebox.showerror("Ошибка", "Введите корректное число в поле 'Количество, м²'.")
+            messagebox.showerror("Viga", "Sisestage korrektne number väljale 'Kogus, m²'.")
             return
         if amount <= 0:
-            messagebox.showerror("Ошибка", "Количество должно быть больше 0.")
+            messagebox.showerror("Viga", "Kogus peab olema suurem kui 0.")
             return
         if mat not in ("POM Valge", "POM Must"):
-            messagebox.showerror("Ошибка", "Выберите материал.")
+            messagebox.showerror("Viga", "Valige materjal.")
             return
 
         # читаем/обновляем JSON
@@ -791,7 +803,7 @@ class MainWindow(tk.Frame):
             "material": mat,
             "type": "manual_add" if typ == "add" else "manual_sub",
             "amount_m2": float(amount),
-            "note": note or "Ручная операция"
+            "note": note or "Käsitsi toiming"
         }
         data["ledger"].append(rec)
 
@@ -802,7 +814,7 @@ class MainWindow(tk.Frame):
         
         # обновим GUI
         self._reload_ledger()
-        self._stock_status.set("Операция добавлена.")
+        self._stock_status.set("Toiming lisatud.")
 
     def _delete_month_calc(self):
         """Удалить все записи type=month_calc за выбранный месяц и пересчитать остатки."""
@@ -812,7 +824,7 @@ class MainWindow(tk.Frame):
         mm = str(self._rm_month.get())
         month = f"{yy}-{mm}"
 
-        if not messagebox.askyesno("Подтверждение", f"Удалить расчёт за {month}?"):
+        if not messagebox.askyesno("Kinnitus", f"Kas kustutada kuu {month} arvestus?"):
             return
 
         data = self._load_stock_data()
@@ -831,44 +843,44 @@ class MainWindow(tk.Frame):
         self._update_negative_highlight()
 
         self._reload_ledger()
-        self._stock_status.set(f"Удалено записей: {before - after}.")
+        self._stock_status.set(f"Kustutatud kirjeid: {before - after}.")
         self._update_calc_button_state()
 
     def _undo_selected(self):
         """Инвертировать выбранную запись журнала (manual_add <-> manual_sub)."""
         sel = getattr(self, "_ledger_tree", None).selection()
         if not sel:
-            messagebox.showwarning("Отмена", "Выберите запись в журнале.")
+            messagebox.showwarning("Tühistamine", "Valige kirje logis.")
             return
 
         iid = sel[0]
         meta = getattr(self, "_ledger_index", {}).get(iid)
         if not meta:
-            messagebox.showerror("Ошибка", "Не удалось найти данные по выбранной записи.")
+            messagebox.showerror("Viga", "Valitud kirje andmeid ei leitud.")
             return
 
         raw_type = (meta.get("type") or "").lower()
         if raw_type not in ("manual_add", "manual_sub"):
-            messagebox.showinfo("Отмена записи",
-                                "Эту запись нельзя отменить таким образом.\n"
-                                "Для расчётов месяца используйте 'Удалить расчёт месяца'.")
+            messagebox.showinfo("Kirje tühistamine",
+                                "Seda kirjet ei saa sel viisil tühistada.\n"
+                                "Kuu arvestuse jaoks kasutage 'Kustuta kuu arvestus'.")
             return
 
         material = meta.get("material")
         month = meta.get("month")
         amount = meta.get("amount")
         if amount <= 0:
-            messagebox.showerror("Ошибка", "Количество в записи равно 0.")
+            messagebox.showerror("Viga", "Kirje kogus on 0")
             return
 
         # Подтверждение
-        pretty_action = "Пополнение" if raw_type == "manual_add" else "Списание"
-        if not messagebox.askyesno("Подтверждение",
-                                f"Отменить запись:\n"
-                                f"Материал: {material}\n"
-                                f"Действие: {pretty_action}\n"
-                                f"Объём: {amount} м²\n\n"
-                                f"Будет создана обратная корректировка."):
+        pretty_action = "Täiendus" if raw_type == "manual_add" else "Mahakandmine"
+        if not messagebox.askyesno("Kinnitus",
+                                f"Kirje tühistamine:\n"
+                                f"Materjal: {material}\n"
+                                f"Toiming: {pretty_action}\n"
+                                f"Объём: {amount} m²\n\n"
+                                f"Luua vastupidine korrigeerimine."):
             return
 
         # Готовим инверсию
@@ -884,7 +896,7 @@ class MainWindow(tk.Frame):
             "material": material,
             "type": inverse_type,
             "amount_m2": float(amount),
-            "note": f"Undo выбранной записи ({pretty_action})",
+            "note": f"Valitud kirje tühistamine ({pretty_action})",
         })
 
         self._recompute_balances_from_ledger(data)
@@ -893,7 +905,7 @@ class MainWindow(tk.Frame):
         
         # Обновление UI
         self._reload_ledger()
-        self._stock_status.set("Добавлена обратная корректировка.")
+        self._stock_status.set("Lisatud vastupidine korrigeerimine.")
 
     def _reload_ledger(self):
         """Читает ledger из JSON и перерисовывает таблицу журнала."""
@@ -903,7 +915,7 @@ class MainWindow(tk.Frame):
         except Exception as e:
             ledger = []
             if hasattr(self, "_stock_status"):
-                self._stock_status.set(f"Ошибка чтения JSON: {e}")
+                self._stock_status.set(f"Viga чтения JSON: {e}")
         # Маппинг iid -> «сырые» значения для undo
         self._ledger_index = {}
         
@@ -947,11 +959,11 @@ class MainWindow(tk.Frame):
             material = rec.get("material", "")
             typ = (rec.get("type", "") or "").lower()
             if   typ == "manual_add":
-                action = "Пополнение"
+                action = "Täiendus"
             elif typ == "manual_sub":
-                action = "Списание"
+                action = "Mahakandmine"
             elif typ == "month_calc":
-                action = "Расчёт месяца"
+                action = "Kuu arvestus"
             else:
                 action = rec.get("type", "")
 
@@ -1006,7 +1018,7 @@ class MainWindow(tk.Frame):
 
 
         if status_var is not None and stock_win_alive:
-            status_var.set(f"Записей в журнале: {cnt}")
+            status_var.set(f"Kirjeid logis: {cnt}")
             
     def _update_negative_highlight(self):
         """Покрасить отрицательные остатки и показать предупреждение в статусе."""
@@ -1039,12 +1051,12 @@ class MainWindow(tk.Frame):
         # короткое предупреждение в статусе
         if any_negative:
             base = self.status_var.get() or ""
-            warn = " | Внимание: отрицательные остатки"
+            warn = " | Tähelepanu: negatiivsed jäägid"
             if warn not in base:
                 self.status_var.set(base + warn)
         else:
             # уберём предупреждение, если всё уже ок
-            self.status_var.set((self.status_var.get() or "").replace(" | Внимание: отрицательные остатки", ""))
+            self.status_var.set((self.status_var.get() or "").replace(" | Tähelepanu: negatiivsed jäägid", ""))
 
     def _month_key(self) -> str:
         """Ключ месяца вида YYYY-MM из текущих комбобоксов."""
@@ -1059,7 +1071,7 @@ class MainWindow(tk.Frame):
         mkey = self._month_key()
         if mkey in closed:
             self._calc_btn.configure(state="disabled")
-            self.status_var.set(f"Месяц {mkey} закрыт: расчёт уже выполнен.")
+            self.status_var.set(f"Kuu {mkey} on suletud: arvestus on juba tehtud.")
         else:
             self._calc_btn.configure(state="normal")
 
@@ -1073,7 +1085,7 @@ class MainWindow(tk.Frame):
 
         # Если месяц уже закрыт — не даём повторно
         if mkey in set(data.get("closed_months", [])):
-            messagebox.showinfo("Расчёт уже выполнен", f"Месяц {mkey} закрыт. Расчёт был произведён ранее.")
+            messagebox.showinfo("Arvestus on juba tehtud", f"Kuu {mkey} on suletud. Arvestus on juba tehtud.")
             self._update_calc_button_state()
             return
 
@@ -1093,12 +1105,12 @@ class MainWindow(tk.Frame):
 
         # Если оба нули — предупредим и выйдем
         if valge == 0 and must == 0:
-            messagebox.showwarning("Нет данных", "За выбранный месяц нет материалов для списания.")
+            messagebox.showwarning("Andmed puuduvad", "Valitud kuu kohta ei ole materjale mahakandmiseks.")
             return
 
         # Запишем операции month_calc (только ненулевые)
         ts_now = _dt.datetime.now().isoformat(timespec="seconds")
-        note = f"Авто: расчёт {mkey}"
+        note = f"Auto: kuu {mkey} arvestus"
 
         if valge > 0:
             data["ledger"].append({
@@ -1135,7 +1147,7 @@ class MainWindow(tk.Frame):
         # Обновить журнал (если окно открыто) и заблокировать кнопку
         self._reload_ledger()
         self._update_calc_button_state()
-        messagebox.showinfo("Готово", f"Расчёт за {mkey} зафиксирован.")
+        messagebox.showinfo("Valmis", f"Kuu {mkey} arvestus on salvestatud.")
 
     def _on_exit(self):
         # При выходе всегда сохраняем last_month и текущий pdf_dir
