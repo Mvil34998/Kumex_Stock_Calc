@@ -269,7 +269,6 @@ class MainWindow(tk.Frame):
             ttk.Label(conv_group, text="m²").grid(row=row_stock, column=2, padx=(0, 8), pady=2, sticky="w")
             row_stock += 1
 
-        ttk.Label(conv_group, text="Jäätmed (waste):").grid(row=row_stock, column=0, padx=8, pady=(8, 2), sticky="w")
         _row_conv = row_stock + 1
         ttk.Label(conv_group, text="Saetera paksus:").grid(row=_row_conv, column=0, padx=8, pady=2, sticky="w")
         e_kerf = ttk.Entry(conv_group, textvariable=self.kerf_mm_var, width=6)
@@ -675,7 +674,6 @@ class MainWindow(tk.Frame):
             res = results.get(mat)
             ideal_val = Decimal('0') if not res else res['s_ideal_sum'].quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             used_val = Decimal('0') if not res else res['m2_used'].quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            waste_val = Decimal('0') if not res else res.get('waste_width_m2', Decimal('0')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             self._m2_used_totals[mat] = used_val
             if mat in self.conv_totals:
                 self.conv_totals[mat].set(str(ideal_val))
@@ -1224,13 +1222,12 @@ class MainWindow(tk.Frame):
         if not hasattr(self, "_calc_btn"):
             return
         data = self._load_stock_data()
-        closed = set(data.get("closed_months", []))
         mkey = self._month_key()
-        if mkey in closed:
-            self._calc_btn.configure(state="disabled")
-            self.status_var.set(f"Kuu {mkey} on suletud: arvestus on juba tehtud.")
-        else:
-            self._calc_btn.configure(state="normal")
+        has_calc = any(r for r in data.get("ledger", []) if r.get("type") == "month_calc" and r.get("month") == mkey)
+        # Кнопку не блокируем, но пишем статус, если месяц уже посчитан
+        self._calc_btn.configure(state="normal")
+        if has_calc:
+            self.status_var.set(f"Kuu {mkey} on juba arvestatud.")
 
     def _apply_stub(self):
         """Фиксируем расчёт месяца: пишем month_calc в журнал, закрываем месяц."""
@@ -1240,16 +1237,20 @@ class MainWindow(tk.Frame):
         mkey = self._month_key()
         data = self._load_stock_data()
 
-        # Если месяц уже закрыт — не даём повторно
-        if mkey in set(data.get("closed_months", [])):
-            messagebox.showinfo("Arvestus on juba tehtud", f"Kuu {mkey} on suletud. Arvestus on juba tehtud.")
+        # Если уже есть расчёт за этот месяц — предупреждаем и даём пользователю сменить месяц
+        if any(r for r in data.get("ledger", []) if r.get("type") == "month_calc" and r.get("month") == mkey):
+            messagebox.showinfo("Arvestus on juba tehtud", f"Kuu {mkey} on juba arvestatud. Valige teine kuu või kustutage arvestus.")
             self._update_calc_button_state()
             return
 
         # Берём рассчитанные значения из правого блока (конвертация, м²)
         def _get(name: str) -> Decimal:
+            var = self.conv_totals.get(name)
+            if not var:
+                return Decimal("0")
+            raw = (var.get() or "0").replace(",", ".").strip()
             try:
-                return Decimal(self._m2_used_totals.get(name, Decimal("0")))
+                return Decimal(raw)
             except Exception:
                 return Decimal("0")
 
