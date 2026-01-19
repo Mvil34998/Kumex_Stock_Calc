@@ -6,8 +6,17 @@ from datetime import datetime
 from pathlib import Path
 import time
 import re
+from decimal import Decimal
 from kumex.io.pdf_reader import read_pdf_text
 from kumex.io.file_ops import load_json, save_json
+
+# --- Kumex расчет: базовые константы по спецификации ---
+PLATE_W_MM = 1000
+PLATE_L_MM = 2000
+BASE_THICKNESS_MM = 52
+STOCK_PLATES = 10
+# Длина реза фиксирована на 1000 мм
+DEFAULT_CUT_LEN_MM = 1000
 
 
 class MainWindow(tk.Frame):
@@ -19,6 +28,7 @@ class MainWindow(tk.Frame):
         self.status_var = tk.StringVar(value="Valmis")
         # Толщина пилы (мм) — влияет на конвертацию в м²
         self.kerf_mm_var = tk.StringVar(value="0.00")
+        self.cut_len_var = tk.StringVar(value=str(DEFAULT_CUT_LEN_MM))
         # При изменении значения пересчитываем конвертацию
         self.kerf_mm_var.trace_add("write", lambda *a: self._calc_m2())
         # Окно "Настройка склада" (пересоздаём по мере закрытия)
@@ -79,6 +89,10 @@ class MainWindow(tk.Frame):
 
         # Итоги конвертации в м² (по текущему месяцу) — для КАЖДОГО материала из JSON
         self.conv_totals = {name: tk.StringVar(value="0.00") for name in self.materials_cfg.keys()}
+        # Храним фактическое списание (m2_used по плитам), чтобы Ledger брал реальные значения, а в UI можно показывать идеальную потребность
+        self._m2_used_totals = {name: Decimal("0.00") for name in self.materials_cfg.keys()}
+        # Отходы по ширине (м²)
+
 
         # --- переменные GUI ---
         self.month_var = tk.StringVar()
@@ -238,93 +252,40 @@ class MainWindow(tk.Frame):
         conv_group.columnconfigure(0, weight=0)
         conv_group.columnconfigure(1, weight=0)
         conv_group.columnconfigure(2, weight=0)
-
-
-        # Строки итогов (только вывод) — динамически для всех материалов
+        # Conversion totals (read-only)
         _row_conv = 0
         for name in self.conv_totals.keys():
             pad_top = (6 if _row_conv == 0 else 2, 2)
-
-            ttk.Label(conv_group, text=f"{name}:").grid(
-                row=_row_conv, column=0, padx=8, pady=pad_top, sticky="w"
-            )
-            # значение ближе к "м²": уменьшаем отступ справа у Entry
-            ttk.Entry(
-                conv_group, textvariable=self.conv_totals[name],
-                width=10, state="readonly"
-            ).grid(
-                row=_row_conv, column=1, padx=(8, 2), pady=pad_top, sticky="w"
-            )
-            # "м²" почти вплотную к полю
-            ttk.Label(conv_group, text="m²").grid(
-                row=_row_conv, column=2, padx=(0, 8), pady=pad_top, sticky="w"
-            )
-
+            ttk.Label(conv_group, text=f"{name}:").grid(row=_row_conv, column=0, padx=8, pady=pad_top, sticky="w")
+            ttk.Entry(conv_group, textvariable=self.conv_totals[name], width=10, state="readonly").grid(row=_row_conv, column=1, padx=(8, 2), pady=pad_top, sticky="w")
+            ttk.Label(conv_group, text="m²").grid(row=_row_conv, column=2, padx=(0, 8), pady=pad_top, sticky="w")
             _row_conv += 1
-            
-                # Толщина пилы (мм)# Разделитель и поле "Толщина пилы"
-        ttk.Separator(conv_group, orient="horizontal").grid(
-            row=_row_conv, column=0, columnspan=3, sticky="ew", padx=8, pady=(6, 4)
-        )
 
-        ttk.Label(conv_group, text="Saetera paksus:").grid(
-            row=_row_conv + 1, column=0, padx=8, pady=2, sticky="w"
-        )
+        ttk.Label(conv_group, text="Jääk (stock):").grid(row=_row_conv, column=0, padx=8, pady=(8, 2), sticky="w")
+        row_stock = _row_conv + 1
+        for name in self.conv_totals.keys():
+            ttk.Label(conv_group, text=name).grid(row=row_stock, column=0, padx=8, pady=2, sticky="w")
+            ttk.Label(conv_group, textvariable=self.materials_cfg[name]["remain_m3"]).grid(row=row_stock, column=1, padx=(8, 2), pady=2, sticky="w")
+            ttk.Label(conv_group, text="m²").grid(row=row_stock, column=2, padx=(0, 8), pady=2, sticky="w")
+            row_stock += 1
+
+        ttk.Label(conv_group, text="Jäätmed (waste):").grid(row=row_stock, column=0, padx=8, pady=(8, 2), sticky="w")
+        _row_conv = row_stock + 1
+        ttk.Label(conv_group, text="Saetera paksus:").grid(row=_row_conv, column=0, padx=8, pady=2, sticky="w")
         e_kerf = ttk.Entry(conv_group, textvariable=self.kerf_mm_var, width=6)
-        e_kerf.grid(
-            row=_row_conv + 1, column=1, padx=(8, 2), pady=2, sticky="w"
-        )
-        # автосейв при выходе из поля и при Enter
+        e_kerf.grid(row=_row_conv, column=1, padx=(8, 2), pady=2, sticky="w")
         e_kerf.bind("<FocusOut>", lambda _e: self._save_config())
         e_kerf.bind("<Return>",  lambda _e: (self._save_config(), "break"))
+        ttk.Label(conv_group, text="mm").grid(row=_row_conv, column=2, padx=(0, 8), pady=2, sticky="w")
 
-        ttk.Label(conv_group, text="mm").grid(
-            row=_row_conv + 1, column=2, padx=(0, 8), pady=2, sticky="w"
-        )
-
-                # Кнопка "Рассчитать" внутри рамки конвертации, снизу справа
         calc_btn = ttk.Button(conv_group, text="Arvuta", command=self._apply_stub)
-        calc_btn.grid(row=_row_conv + 2, column=0, columnspan=3, sticky="e", padx=8, pady=(10, 6))
-        self._calc_btn = calc_btn  # пригодится позже, когда будем блокировать закрытые месяцы
-
-        # первичная проверка (на случай, если месяц уже закрыт)
-        self._update_calc_button_state()
-
-
-        # Статус-бар
-        
-        status = ttk.Label(self, textvariable=self.status_var, anchor="w")
-        status.pack(fill="x", padx=16, pady=(4, 8))
-
-
-        # колонки
-        container.columnconfigure(1, weight=1)
-        
-        self._scan_pdfs()
-        # первичная проверка (на случай, если месяц уже закрыт)
-
-    # ------------- Загрузка/сохранение конфигурации -------------
-
-    def _load_defaults(self):
-        cfg = load_json(self.config_path, default={})
-        current_month = datetime.now().strftime("%Y-%m")
-        # всегда системный месяц
-        target = current_month
-        yy, mm = target.split("-")
-        self.month_var.set(target)
-        self.year_var.set(yy)
-        self.month_num_var.set(mm)
-        self.kerf_mm_var.set(str(cfg.get("kerf_mm", self.kerf_mm_var.get() or "1")))
-
-        # Папка PDF: по умолчанию data/input_pdf
-        default_pdf_dir = (self.state_dir / "input_pdf").as_posix()
-        self.pdf_dir_var.set(cfg.get("pdf_dir", default_pdf_dir))
-
-    def _save_config(self):
+        calc_btn.grid(row=_row_conv + 1, column=0, columnspan=3, sticky="e", padx=8, pady=(10, 6))
+        self._calc_btn = calc_btn
         self.state_dir.mkdir(parents=True, exist_ok=True)
         data = {
-            "pdf_dir": self.pdf_dir_var.get().strip()
-            , "kerf_mm": float(self.kerf_mm_var.get().strip() or "1")
+            "pdf_dir": self.pdf_dir_var.get().strip(),
+            "kerf_mm": float(self.kerf_mm_var.get().strip() or "1"),
+
         }
         save_json(self.config_path, data)
         # ---------------- Служебные обработчики ----------------
@@ -434,13 +395,15 @@ class MainWindow(tk.Frame):
 
                 desc = line
                 qty = None
+                qty_text = ""
 
-                # 1) qty на этой же строке
+                # 1) qty ?? ???? ?? ??????
                 m = qty_any_rx.search(line)
                 if m:
                     qty = int(m.group(1))
+                    qty_text = line
 
-                # 2) если не нашли — ищем на 1..3 строках ниже
+                # 2) ???? ?? ????? ? ???? ?? 1..3 ??????? ????
                 if qty is None:
                     for j in range(1, 4):
                         if i + j >= n:
@@ -448,20 +411,34 @@ class MainWindow(tk.Frame):
                         m = qty_any_rx.search(lines[i + j])
                         if m:
                             qty = int(m.group(1))
+                            qty_text = lines[i + j]
                             break
 
-                # 3) если не нашли — пробуем табличный вариант в 1..2 строках выше
+                # 3) ???? ?? ????? ? ??????? ????????? ??????? ? 1..2 ??????? ????
                 if qty is None:
                     for j in (1, 2):
                         if i - j >= 0:
                             m = qty_row_above_rx.match(lines[i - j])
                             if m:
                                 qty = int(m.group(1))
+                                qty_text = lines[i - j]
                                 break
 
                 if qty is None:
-                    # не смогли уверенно найти количество — пропускаем позицию
+                    # ?? ?????? ???????? ????? ?????????? ? ?????????? ???????
                     continue
+
+                # ?????????? uom: ???? ????? ? ??????????? ???? ??????? mm ? ???????? ??? ????? ?????, ?? ?????
+                # ?????????? uom: ??????? ??? ? ???? ?????????? >= 1000, ??????? ??? ????? ?????? (??), ????? ?????
+                uom = "mm" if qty >= 1000 else "tk"
+                # ???????? ??????: ???? ? ?????? ???-???? ???? ??????? mm, ???? ??????? ????????
+                if uom == "tk":
+                    qty_ctx = f"{desc}\n{qty_text}"
+                    if re.search(rf"{qty}\\s*mm\\b", qty_ctx, re.IGNORECASE):
+                        uom = "mm"
+
+                # ????????? ??? ??????? (?? ??????? ??? ???????)
+                # ?????????? ????????
 
                 # сохраняем как словарь (на будущее для отчётов)
                 # определяем материал
@@ -479,6 +456,7 @@ class MainWindow(tk.Frame):
                 self.material_rows.append({
                     "desc": desc,
                     "qty": qty,
+                    "uom": uom,
                     "po": po,
                     "date": od,
                     "material": mat_name
@@ -490,6 +468,7 @@ class MainWindow(tk.Frame):
 
         self.mat_count_lbl.config(text=f"Positsioone: {total}")
         self._set_status(f"Töödeldud PDF: {len(self.pdf_files)} | Leitud positsioone: {total}")
+        self._calc_m2()
 
     def _on_date_change(self, *_):
         self._sync_month_var()
@@ -506,76 +485,254 @@ class MainWindow(tk.Frame):
         if len(yy) == 4 and mm in {f"{i:02d}" for i in range(1,13)}:
             self.month_var.set(f"{yy}-{mm}")
 
+    # ------------- Загрузка/сохранение конфигурации -------------
+
+    def _load_defaults(self):
+        cfg = load_json(self.config_path, default={})
+        current_month = datetime.now().strftime("%Y-%m")
+        target = cfg.get("last_month", current_month)
+        if "-" not in target:
+            target = current_month
+        try:
+            yy, mm = target.split("-")
+        except ValueError:
+            yy, mm = current_month.split("-")
+        self.month_var.set(f"{yy}-{mm}")
+        self.year_var.set(yy)
+        self.month_num_var.set(mm)
+        self.kerf_mm_var.set(str(cfg.get("kerf_mm", self.kerf_mm_var.get() or "0")))
+        default_pdf_dir = (self.state_dir / "input_pdf").as_posix()
+        self.pdf_dir_var.set(cfg.get("pdf_dir", default_pdf_dir))
+
     def _calc_m2(self):
-        """Пересчитывает площади (m²) по материалам на основе таблицы заказов."""
+        """Compute cutting plan and summary according to Codex rules."""
         import re
         from decimal import Decimal, ROUND_HALF_UP
 
-        totals = {"POM Valge": Decimal("0.0"), "POM Must": Decimal("0.0")}
+        # длина реза фиксирована
+        cut_len = DEFAULT_CUT_LEN_MM
+        self.cut_len_var.set(str(cut_len))
 
-        for row in self.material_rows:
-            desc = str(row.get("desc", ""))
-            qty = int(row.get("qty", 0) or 0)
-            material = row.get("material", "")
-            # Исключаем ESD-материалы из калькуляции (например, "ESD_POM_valge 52x52x1000")
-            
+        try:
+            kerf = Decimal(str(self.kerf_mm_var.get()).replace(',', '.'))
+            if kerf < 0:
+                kerf = Decimal('0')
+        except Exception:
+            kerf = Decimal('0')
 
-            # считаем только нужные материалы
-            if not any(x in material for x in ["POM Valge", "POM Must"]):
-                continue
+        S_plate = Decimal(PLATE_W_MM * PLATE_L_MM) / Decimal(1_000_000)
+        layers_per_plate = PLATE_L_MM // cut_len
 
-            # извлечь все числа
-            nums = [int(x) for x in re.findall(r"\d+", desc)]
+        issues = []
+        plan_layers_rows = []
+        results = {}
+
+        def add_issue(material, dims, uom, qty, code, detail):
+            issues.append({
+                'material': material,
+                'dims': dims,
+                'uom': uom,
+                'qty': qty,
+                'issue_code': code,
+                'issue_detail': detail,
+            })
+
+        def parse_dims(desc: str):
+            nums = [int(x) for x in re.findall(r'\d+', desc)]
             if len(nums) < 3:
+                return []
+            return sorted(nums, reverse=True)[:3]
+
+        items_by_mat = {m: [] for m in ('POM Valge', 'POM Must')}
+        for row in self.material_rows:
+            mat = row.get('material', '')
+            if mat not in items_by_mat:
                 continue
-
-            # считаем количество "52"
-            cnt_52 = nums.count(52)
-
-            if cnt_52 == 1:
-                sides = [x for x in nums if x != 52]
-                if len(sides) >= 2:
-                    A, B = sides[0], sides[1]
-                else:
-                    continue
-            elif cnt_52 == 2:
-                non52 = [x for x in nums if x != 52]
-                if len(non52) == 1:
-                    A, B = 52, non52[0]
-                else:
-                    continue
-            elif cnt_52 == 3:
-                A, B = 52, 52
-            else:  # ни одного 52 → берём 2 самые большие стороны
-                sides = sorted(nums, reverse=True)
-                A, B = sides[0], sides[1]
-
-            # Толщина пилы (мм), безопасный парсинг
+            uom = str(row.get('uom', 'tk') or 'tk')
             try:
-                kerf = Decimal(str(self.kerf_mm_var.get()).replace(",", "."))
-                if kerf < 0:
-                    kerf = Decimal("0")
+                qty = int(row.get('qty', 0) or 0)
             except Exception:
-                kerf = Decimal("0")
+                qty = 0
+            dims = parse_dims(str(row.get('desc', '')))
+            if qty <= 0:
+                add_issue(mat, dims, uom, qty, 'ISSUE_QTY_NON_POSITIVE', 'Qty must be positive')
+                continue
+            if len(dims) < 3:
+                add_issue(mat, dims, uom, qty, 'ISSUE_NO_DIM_LE_BASE_THICKNESS', 'Need three dimensions')
+                continue
+            items_by_mat[mat].append({'dims': dims, 'qty': qty, 'uom': uom})
 
-            A_eff = Decimal(A) + kerf
-            B_eff = Decimal(B) + kerf
+        for mat, items in items_by_mat.items():
+            strips_widths = []
+            s_ideal_sum = Decimal('0')
+            waste_width_sum = Decimal('0')
+            waste_thickness_sum = Decimal('0')
+            for item in items:
+                dims = item['dims']
+                qty = item['qty']
+                uom = item['uom']
 
-            # Площадь одной детали с учётом пилы
-            S1 = (A_eff * B_eff) / Decimal(1_000_000)
-            # площадь всех qty
-            Spos = S1 * qty
+                candidates = [d for d in dims if d <= BASE_THICKNESS_MM]
+                if not candidates:
+                    add_issue(mat, dims, uom, qty, 'ISSUE_NO_DIM_LE_BASE_THICKNESS', 'All dimensions exceed base thickness')
+                    continue
+                t = max(candidates)
+                rem = dims.copy()
+                rem.remove(t)
+                rem_sorted = sorted(rem, reverse=True)
+                if len(rem_sorted) < 2:
+                    add_issue(mat, dims, uom, qty, 'ISSUE_NO_FEASIBLE_ORIENTATION', 'Not enough sides for footprint')
+                    continue
+                p, q = rem_sorted[:2]
+                # kerf ?????? ?? ?????????? ????????; ???? ?????? ????? ????? ???? (cut_len), ?? ????????? kerf
+                def _add_kerf(dim: Decimal) -> Decimal:
+                    return dim if dim == Decimal(cut_len) else dim + kerf
 
-            # округление только для вывода (сумму храним точно)
-            if "Valge" in material:
-                totals["POM Valge"] += Spos
-            elif "Must" in material:
-                totals["POM Must"] += Spos
+                p_eff = _add_kerf(Decimal(p))
+                q_eff = _add_kerf(Decimal(q))
+                orientations = []
+                width_issue = False
 
-        # обновляем GUI (с двумя знаками)
-        for name, value in totals.items():
-            rounded = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            self.conv_totals[name].set(str(rounded))
+                for w, L in ((p_eff, q_eff), (q_eff, p_eff)):
+                    if w > PLATE_W_MM:
+                        width_issue = True
+                        continue
+                    if L > cut_len:
+                        continue
+                    if uom == 'tk':
+                        k = int(Decimal(cut_len) // Decimal(L))
+                        if k <= 0:
+                            continue
+                        strips = (qty + k - 1) // k
+                        W_demand = strips * w
+                        L_waste = Decimal(strips * cut_len) - Decimal(qty) * Decimal(L)
+                        S_ideal = (Decimal(strips) * Decimal(w) * Decimal(cut_len)) / Decimal(1_000_000)
+                    else:
+                        # uom=mm: qty ??? ????? ?????; ?????? ??????????? = min ?????????? ??????
+                        w_use = min(w, q_eff, p_eff)
+                        strips = (qty + cut_len - 1) // cut_len
+                        W_demand = strips * w_use
+                        L_waste = Decimal(strips * cut_len - qty)
+                        S_ideal = (Decimal(strips) * Decimal(w_use) * Decimal(cut_len)) / Decimal(1_000_000)
+                        w = w_use
+                    orientations.append((W_demand, L_waste, Decimal(BASE_THICKNESS_MM - t), w, strips, S_ideal))
+                if not orientations:
+                    if width_issue:
+                        add_issue(mat, dims, uom, qty, 'ISSUE_WIDTH_GT_PLATE', f'w > {PLATE_W_MM}')
+                    add_issue(mat, dims, uom, qty, 'ISSUE_NO_FEASIBLE_ORIENTATION', 'No orientation fits plate/cut length')
+                    continue
+
+                orientations.sort(key=lambda x: (x[0], x[1], x[2]))
+                _, _, _, w_sel, strips, S_ideal = orientations[0]
+                s_ideal_sum += S_ideal
+                strips_widths.extend([float(w_sel)] * int(strips))
+
+                if t < BASE_THICKNESS_MM:
+                    waste_thickness_sum += (Decimal(BASE_THICKNESS_MM - t) * Decimal(p) * Decimal(q) * qty)
+
+            layers = []
+            for w in sorted(strips_widths, reverse=True):
+                placed = False
+                for layer in layers:
+                    if sum(layer) + w <= PLATE_W_MM:
+                        layer.append(w)
+                        placed = True
+                        break
+                if not placed:
+                    layers.append([w])
+
+            for idx, layer in enumerate(layers, start=1):
+                remaining = PLATE_W_MM - sum(layer)
+                plan_layers_rows.append({
+                    'material': mat,
+                    'layer_id': idx,
+                    'remaining_width_mm': remaining,
+                    'strip_widths': layer,
+                })
+                waste_width_sum += Decimal(remaining)
+
+            layers_used = len(layers)
+            plates_used = (layers_used + layers_per_plate - 1) // layers_per_plate
+            plates_left = STOCK_PLATES - plates_used
+            s_used = Decimal(plates_used) * S_plate
+            s_left = Decimal(max(plates_left, 0)) * S_plate
+            s_waste_width = (waste_width_sum * Decimal(cut_len)) / Decimal(1_000_000)
+
+            results[mat] = {
+                'layers_used': layers_used,
+                'plates_used': plates_used,
+                'plates_left': plates_left,
+                'm2_used': s_used,
+                'm2_left': s_left,
+                'layers_per_plate': layers_per_plate,
+
+                's_ideal_sum': s_ideal_sum,
+                'waste_width_m2': s_waste_width,
+                'waste_thickness_mm3': waste_thickness_sum,
+            }
+
+        for mat in ('POM Valge', 'POM Must'):
+            res = results.get(mat)
+            ideal_val = Decimal('0') if not res else res['s_ideal_sum'].quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            used_val = Decimal('0') if not res else res['m2_used'].quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            waste_val = Decimal('0') if not res else res.get('waste_width_m2', Decimal('0')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            self._m2_used_totals[mat] = used_val
+            if mat in self.conv_totals:
+                self.conv_totals[mat].set(str(ideal_val))
+
+
+
+        self._write_reports(results, plan_layers_rows, issues)
+
+    def _write_reports(self, results, plan_layers_rows, issues):
+        """Save summary, layer plan, and issues to files."""
+        import json
+        import csv
+
+        report_dir = self.state_dir / 'reports'
+        report_dir.mkdir(parents=True, exist_ok=True)
+
+        summary_rows = []
+        for mat, res in results.items():
+            summary_rows.append({
+                'material': mat,
+                'plates_used': res.get('plates_used', 0),
+                'm2_used': float(res.get('m2_used', 0)),
+                'plates_left': res.get('plates_left', 0),
+                'm2_left': float(res.get('m2_left', 0)),
+                'layers_used': res.get('layers_used', 0),
+                'layers_per_plate': res.get('layers_per_plate', 0),
+
+                's_ideal_sum': float(res.get('s_ideal_sum', 0)),
+                'waste_width_m2': float(res.get('waste_width_m2', 0)),
+            })
+
+        (report_dir / 'summary.json').write_text(json.dumps(summary_rows, ensure_ascii=False, indent=2), encoding='utf-8')
+        with (report_dir / 'summary.csv').open('w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                'material', 'plates_used', 'm2_used', 'plates_left', 'm2_left',
+
+            ])
+            writer.writeheader()
+            writer.writerows(summary_rows)
+
+        with (report_dir / 'plan_layers.csv').open('w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=['material', 'layer_id', 'remaining_width_mm', 'strip_widths'])
+            writer.writeheader()
+            for row in plan_layers_rows:
+                writer.writerow({
+                    'material': row.get('material'),
+                    'layer_id': row.get('layer_id'),
+                    'remaining_width_mm': row.get('remaining_width_mm'),
+                    'strip_widths': ' '.join(str(x) for x in row.get('strip_widths', [])),
+                })
+
+        with (report_dir / 'issues.csv').open('w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=['material', 'dims', 'uom', 'qty', 'issue_code', 'issue_detail'])
+            writer.writeheader()
+            for row in issues:
+                writer.writerow(row)
+
 
     def _open_stock_dialog(self):
         """Открывает окно 'Настройка склада' с таблицей журнала операций."""
@@ -1091,12 +1248,8 @@ class MainWindow(tk.Frame):
 
         # Берём рассчитанные значения из правого блока (конвертация, м²)
         def _get(name: str) -> Decimal:
-            var = self.conv_totals.get(name)
-            if not var:
-                return Decimal("0")
-            raw = (var.get() or "0").replace(",", ".").strip()
             try:
-                return Decimal(raw)
+                return Decimal(self._m2_used_totals.get(name, Decimal("0")))
             except Exception:
                 return Decimal("0")
 
