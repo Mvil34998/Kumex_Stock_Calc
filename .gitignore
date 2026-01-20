@@ -3,4 +3,12 @@ __pycache__/
 .pytest_cache/
 .vscode/
 .idea/
+.history/
+state/
+src/kumex/.history/
+src/kumex/build/
+src/kumex/dist/
+src/kumex/__pycache__/
+src/kumex/io/__pycache__/
+src/kumex/ui/__pycache__/
 *.pyc
