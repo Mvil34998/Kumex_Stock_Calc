@@ -273,13 +273,6 @@ class MainWindow(tk.Frame):
         calc_btn = ttk.Button(conv_group, text="Arvuta", command=self._apply_stub)
         calc_btn.grid(row=kerf_row + 1, column=0, columnspan=3, sticky="e", padx=8, pady=(10, 6))
         self._calc_btn = calc_btn
-        self.state_dir.mkdir(parents=True, exist_ok=True)
-        data = {
-            "pdf_dir": self.pdf_dir_var.get().strip(),
-            "kerf_mm": float(self.kerf_mm_var.get().strip() or "1"),
-
-        }
-        save_json(self.config_path, data)
         # ---------------- Служебные обработчики ----------------
 
     def _choose_pdf_dir(self):
@@ -495,6 +488,19 @@ class MainWindow(tk.Frame):
         self.kerf_mm_var.set(str(cfg.get("kerf_mm", self.kerf_mm_var.get() or "0")))
         default_pdf_dir = (self.state_dir / "input_pdf").as_posix()
         self.pdf_dir_var.set(cfg.get("pdf_dir", default_pdf_dir))
+
+    def _save_config(self):
+        """Persist current UI configuration (month, kerf, pdf dir)."""
+        try:
+            kerf_val = float(str(self.kerf_mm_var.get()).replace(",", ".") or 0)
+        except Exception:
+            kerf_val = 0.0
+        data = {
+            "last_month": self._month_key(),
+            "pdf_dir": self.pdf_dir_var.get().strip(),
+            "kerf_mm": kerf_val,
+        }
+        save_json(self.config_path, data)
 
     def _calc_m2(self):
         """Compute cutting plan and summary according to Codex rules."""
