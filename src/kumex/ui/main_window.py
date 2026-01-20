@@ -33,6 +33,7 @@ class MainWindow(tk.Frame):
         self.kerf_mm_var.trace_add("write", lambda *a: self._calc_m2())
         # Окно "Настройка склада" (пересоздаём по мере закрытия)
         self._stock_win = None
+        self._stock_win_binds = {}
 
 
         # Настройки склада Kumex (минимум: два материала) — пока без логики
@@ -261,24 +262,16 @@ class MainWindow(tk.Frame):
             ttk.Label(conv_group, text="m²").grid(row=_row_conv, column=2, padx=(0, 8), pady=pad_top, sticky="w")
             _row_conv += 1
 
-        ttk.Label(conv_group, text="Jääk (stock):").grid(row=_row_conv, column=0, padx=8, pady=(8, 2), sticky="w")
-        row_stock = _row_conv + 1
-        for name in self.conv_totals.keys():
-            ttk.Label(conv_group, text=name).grid(row=row_stock, column=0, padx=8, pady=2, sticky="w")
-            ttk.Label(conv_group, textvariable=self.materials_cfg[name]["remain_m3"]).grid(row=row_stock, column=1, padx=(8, 2), pady=2, sticky="w")
-            ttk.Label(conv_group, text="m²").grid(row=row_stock, column=2, padx=(0, 8), pady=2, sticky="w")
-            row_stock += 1
-
-        _row_conv = row_stock + 1
-        ttk.Label(conv_group, text="Saetera paksus:").grid(row=_row_conv, column=0, padx=8, pady=2, sticky="w")
+        kerf_row = _row_conv + 1
+        ttk.Label(conv_group, text="Saetera paksus:").grid(row=kerf_row, column=0, padx=8, pady=(10, 2), sticky="w")
         e_kerf = ttk.Entry(conv_group, textvariable=self.kerf_mm_var, width=6)
-        e_kerf.grid(row=_row_conv, column=1, padx=(8, 2), pady=2, sticky="w")
+        e_kerf.grid(row=kerf_row, column=1, padx=(8, 2), pady=(10, 2), sticky="w")
         e_kerf.bind("<FocusOut>", lambda _e: self._save_config())
         e_kerf.bind("<Return>",  lambda _e: (self._save_config(), "break"))
-        ttk.Label(conv_group, text="mm").grid(row=_row_conv, column=2, padx=(0, 8), pady=2, sticky="w")
+        ttk.Label(conv_group, text="mm").grid(row=kerf_row, column=2, padx=(0, 8), pady=(10, 2), sticky="w")
 
         calc_btn = ttk.Button(conv_group, text="Arvuta", command=self._apply_stub)
-        calc_btn.grid(row=_row_conv + 1, column=0, columnspan=3, sticky="e", padx=8, pady=(10, 6))
+        calc_btn.grid(row=kerf_row + 1, column=0, columnspan=3, sticky="e", padx=8, pady=(10, 6))
         self._calc_btn = calc_btn
         self.state_dir.mkdir(parents=True, exist_ok=True)
         data = {
@@ -742,14 +735,47 @@ class MainWindow(tk.Frame):
         self._stock_win.withdraw()  # спрятать до настройки
         self._stock_win.title("Lao seaded… ")
         self._stock_win.transient(self.master)
-        self._stock_win.grab_set()
         self._stock_win.geometry("720x420")
+
+        def _release_modal_grab(_=None):
+            try:
+                self._stock_win.grab_release()
+            except Exception:
+                pass
+
+        def _restore_modal_grab(_=None):
+            if self._stock_win and tk.Toplevel.winfo_exists(self._stock_win):
+                try:
+                    self._stock_win.grab_set()
+                except Exception:
+                    pass
+
+        # Следим за сворачиванием/разворачиванием, чтобы не оставлять grab на скрытом окне
+        self._stock_win_binds = {
+            "master_unmap": self.master.bind("<Unmap>", _release_modal_grab, add="+"),
+            "master_map": self.master.bind("<Map>", _restore_modal_grab, add="+"),
+            "stock_unmap": self._stock_win.bind("<Unmap>", _release_modal_grab, add="+"),
+            "stock_map": self._stock_win.bind("<Map>", _restore_modal_grab, add="+"),
+        }
 
         def _on_close():
             try:
                 self._stock_win.grab_release()
             except Exception:
                 pass
+            try:
+                binds = self._stock_win_binds or {}
+                if binds.get("master_unmap"):
+                    self.master.unbind("<Unmap>", binds["master_unmap"])
+                if binds.get("master_map"):
+                    self.master.unbind("<Map>", binds["master_map"])
+                if binds.get("stock_unmap"):
+                    self._stock_win.unbind("<Unmap>", binds["stock_unmap"])
+                if binds.get("stock_map"):
+                    self._stock_win.unbind("<Map>", binds["stock_map"])
+            except Exception:
+                pass
+            self._stock_win_binds = {}
             self._stock_win.destroy()
             self._stock_win = None
 
@@ -800,7 +826,7 @@ class MainWindow(tk.Frame):
         # чтобы поле комментария имело место
 
         # ===== УДАЛЕНИЕ РАСЧЁТА МЕСЯЦА =====
-        rm_box = ttk.LabelFrame(frm, text="Kustuta kuu arvestus (month_calc)")
+        rm_box = ttk.LabelFrame(frm, text="Kustuta kuu arvestus")
         rm_box.pack(fill="x", padx=0, pady=(0, 8))
 
         self._rm_year = tk.StringVar(value=self.year_var.get())
