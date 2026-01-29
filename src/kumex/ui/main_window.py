@@ -1,12 +1,13 @@
 
 import os
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, simpledialog
 from datetime import datetime
 from pathlib import Path
 import time
 import re
 from decimal import Decimal, ROUND_HALF_UP
+import uuid
 from kumex.io.pdf_reader import read_pdf_text
 from kumex.io.file_ops import load_json, save_json
 
@@ -197,20 +198,18 @@ class MainWindow(tk.Frame):
         calc_frame.grid(row=6, column=0, columnspan=3, sticky="nsew", pady=(12, 0))
         container.rowconfigure(6, weight=1)
         calc_frame.columnconfigure(0, weight=1)
-        cols_calc = ("eff_date", "material", "op", "qty", "period", "source")
+        cols_calc = ("eff_date", "material", "op", "qty", "period")
         self.calc_tree = ttk.Treeview(calc_frame, columns=cols_calc, show="headings", height=8)
         self.calc_tree.heading("eff_date", text="Effective date")
         self.calc_tree.heading("material", text="Material")
         self.calc_tree.heading("op", text="Operation")
         self.calc_tree.heading("qty", text="m²")
         self.calc_tree.heading("period", text="Period")
-        self.calc_tree.heading("source", text="Source/PO")
         self.calc_tree.column("eff_date", width=110, anchor="center")
         self.calc_tree.column("material", width=120, anchor="w")
         self.calc_tree.column("op", width=90, anchor="center")
         self.calc_tree.column("qty", width=80, anchor="e")
         self.calc_tree.column("period", width=140, anchor="center")
-        self.calc_tree.column("source", width=200, anchor="w")
 
         scr_calc = ttk.Scrollbar(calc_frame, orient="vertical", command=self.calc_tree.yview)
         self.calc_tree.configure(yscrollcommand=scr_calc.set)
@@ -1108,6 +1107,14 @@ class MainWindow(tk.Frame):
             data["materials"][k].setdefault("stock_m3", 0.0)   # тут «м3» — просто имя ключа; фактически м²
             data["materials"][k].setdefault("remain_m3", 0.0)  # фактически м²
         data.setdefault("ledger", [])
+        # уникальные идентификаторы для операций
+        changed = False
+        for rec in data["ledger"]:
+            if not rec.get("uid"):
+                rec["uid"] = str(uuid.uuid4())
+                changed = True
+        if changed:
+            save_json(self.stock_path, data)
         data.setdefault("closed_months", [])
         return data
 
@@ -1214,24 +1221,28 @@ class MainWindow(tk.Frame):
             messagebox.showerror("Viga", "Valige materjal.")
             return
 
-        # дата заказа/поступления (effective_date)
+        # дата из Order/Arrival (для вывода в столбце Period)
         eff_raw = (self._op_effective_date.get() or "").strip()
         try:
-            eff_dt = _dt.datetime.strptime(eff_raw, "%d.%m.%Y").date()
-            eff_iso = eff_dt.isoformat()
+            eff_dt_full = _dt.datetime.strptime(eff_raw, "%d.%m.%Y").date()
         except Exception:
             messagebox.showerror("Viga", "Sisestage kuupäev kujul dd.mm.yyyy väljale 'Order/Arrival date'.")
             return
+        # дата записи = момент создания записи (DDMMYY)
+        eff_dt = _dt.date.today()
+        eff_iso = eff_dt.strftime("%d%m%y")
 
         # читаем/обновляем JSON
         data = self._load_stock_data()
         rec = {
             "ts": _dt.datetime.now().isoformat(timespec="seconds"),
+            "uid": str(uuid.uuid4()),
             "month": eff_dt.strftime("%Y-%m"),
             "material": mat,
             "type": "manual_add" if op == "add" else "manual_sub" if op == "sub" else "manual_set",
             "amount_m2": float(amount_val),
             "effective_date": eff_iso,
+            "period": eff_dt_full.isoformat(),
             "note": note or "Käsitsi toiming"
         }
         data["ledger"].append(rec)
@@ -1243,6 +1254,7 @@ class MainWindow(tk.Frame):
         
         # обновим GUI
         self._reload_ledger()
+        self._reload_calculations()
         self.status_var.set("Toiming lisatud.")
 
     def _delete_month_calc(self):
@@ -1492,11 +1504,11 @@ class MainWindow(tk.Frame):
 
     # ---------------- Calculations table ----------------
     def _reload_calculations(self):
-        """Заполнить таблицу 'Расчёты' по фильтру effective_date (месяц/год)."""
+        """Заполнить таблицу 'Расчёты'."""
         tree = getattr(self, "calc_tree", None)
         if not tree or not tree.winfo_exists():
             return
-
+        self._calc_iid_to_uid = {}
         for iid in tree.get_children():
             tree.delete(iid)
 
@@ -1508,8 +1520,9 @@ class MainWindow(tk.Frame):
         def _parse_eff(rec):
             eff = rec.get("effective_date")
             if eff:
+                # формат DDMMYY
                 try:
-                    return _dt.fromisoformat(eff).date()
+                    return _dt.datetime.strptime(eff, "%d%m%y").date()
                 except Exception:
                     pass
             ts = rec.get("ts")
@@ -1546,7 +1559,7 @@ class MainWindow(tk.Frame):
                 op = typ_raw.upper() if typ_raw else ""
 
             qty = rec.get("amount_m2", "")
-            period = ""
+            period = rec.get("period") or ""
             if typ_raw == "month_calc":
                 period = rec.get("month") or f"{d.year}-{d.month:02d}"
                 pf = rec.get("period_from")
@@ -1562,19 +1575,16 @@ class MainWindow(tk.Frame):
                     months = rec.get("months_covered") or []
                     if months:
                         period = f"{months[0]}…{months[-1]}"
-            source = rec.get("sources") or rec.get("note") or ""
-            if isinstance(source, list):
-                source = ", ".join(map(str, source))
-
+            iid = f"{d.isoformat()}-{idx}"
+            self._calc_iid_to_uid[iid] = rec.get("uid")
             tree.insert(
-                "", "end", iid=f"{d.isoformat()}-{idx}",
+                "", "end", iid=iid,
                 values=(
                     d.isoformat(),
                     rec.get("material", ""),
                     op,
                     qty,
                     period,
-                    source,
                 ),
                 tags=(typ_raw,)
             )
@@ -1636,37 +1646,18 @@ class MainWindow(tk.Frame):
             messagebox.showwarning("Valik", "Valige kirje tabelist 'Расчёты'.")
             return
         iid, vals = sel
-        eff_date, material, op, qty, period, source = vals
-
         data = self._load_stock_data()
         ledger = data.get("ledger", [])
 
-        # находим запись по eff_date/material/operation/qty/period (первое совпадение)
         target = None
-        for rec in ledger:
-            eff = rec.get("effective_date") or ""
-            mat = rec.get("material") or ""
-            typ = (rec.get("type") or "").lower()
-            if typ == "manual_add":
-                op_raw = "ADD"
-            elif typ == "manual_sub":
-                op_raw = "SUB"
-            elif typ == "manual_set":
-                op_raw = "SET"
-            elif typ == "month_calc":
-                op_raw = "CALC_DEDUCT"
-            elif typ == "calc_deduct":
-                op_raw = "CALC_DEDUCT"
-            else:
-                op_raw = typ.upper()
-            if eff == eff_date and mat == material and op_raw == op and str(rec.get("amount_m2", "")) == str(qty):
-                target = rec
-                break
-
-        if not target:
+        if hasattr(self, "_calc_iid_to_uid"):
+            uid = self._calc_iid_to_uid.get(iid)
+            target = next((r for r in ledger if r.get("uid") == uid), None)
+        if target is None:
             messagebox.showerror("Kustutamine", "Kirjet ei leitud ledgeris.")
             return
 
+        eff_date, material, op, qty, period = vals
         if not messagebox.askyesno("Kinnitus", f"Kustutada valitud kirje?\n{eff_date} {material} {op} {qty}"):
             return
 
@@ -1677,6 +1668,9 @@ class MainWindow(tk.Frame):
         self._update_negative_highlight()
         self._reload_calculations()
         self._reload_ledger()
+        self._calc_m2()
+        self._update_calc_button_state()
+        self.status_var.set("Kirje kustutati ja arvestused värskendati.")
 
     def _calc_edit_selected(self):
         sel = self._calc_get_selected()
@@ -1684,90 +1678,40 @@ class MainWindow(tk.Frame):
             messagebox.showwarning("Valik", "Valige kirje tabelist 'Расчёты'.")
             return
         iid, vals = sel
-        eff_date, material, op, qty, period, source = vals
+        eff_date, material, op, qty, period = vals
         data = self._load_stock_data()
         ledger = data.get("ledger", [])
 
-        # найти первую подходящую запись
         target = None
-        target_idx = None
-        for i, rec in enumerate(ledger):
-            typ = (rec.get("type") or "").lower()
-            op_raw = "CALC_DEDUCT" if typ == "month_calc" else "ADD" if typ == "manual_add" else "SUB" if typ == "manual_sub" else "SET" if typ == "manual_set" else typ.upper()
-            if rec.get("effective_date") == eff_date and rec.get("material") == material and op_raw == op and str(rec.get("amount_m2", "")) == str(qty):
-                target = rec
-                target_idx = i
-                break
-
+        if hasattr(self, "_calc_iid_to_uid"):
+            uid = self._calc_iid_to_uid.get(iid)
+            target = next((r for r in ledger if r.get("uid") == uid), None)
         if target is None:
             messagebox.showerror("Muutmine", "Kirjet ei leitud ledgeris.")
             return
 
-        if op == "CALC_DEDUCT":
-            messagebox.showinfo("Muutmine", "CALC_DEDUCT redigeerimine lisatakse hiljem.")
+        # запрос нового количества
+        new_qty = simpledialog.askstring("Muuda kogus", f"Uus kogus m² (praegu {qty}):", parent=self)
+        if new_qty is None:
+            return  # cancel
+        try:
+            amt = Decimal(str(new_qty).replace(",", "."))
+        except Exception:
+            messagebox.showerror("Muutmine", "Kogus peab olema number.")
+            return
+        if amt < 0:
+            messagebox.showerror("Muutmine", "Kogus ei tohi olla negatiivne.")
             return
 
-        # Создаём простую форму редактирования
-        win = tk.Toplevel(self)
-        win.title("Muuda kirje")
-        win.grab_set()
-
-        tk.Label(win, text="Effective date (dd.mm.yyyy)").grid(row=0, column=0, sticky="w", padx=8, pady=6)
-        eff_var = tk.StringVar(value=datetime.strptime(eff_date, "%Y-%m-%d").strftime("%d.%m.%Y") if eff_date else "")
-        tk.Entry(win, textvariable=eff_var, width=16).grid(row=0, column=1, sticky="w", padx=8, pady=6)
-
-        tk.Label(win, text="Materjal").grid(row=1, column=0, sticky="w", padx=8, pady=6)
-        mat_var = tk.StringVar(value=material or "POM Valge")
-        tk.OptionMenu(win, mat_var, "POM Valge", "POM Must").grid(row=1, column=1, sticky="w", padx=8, pady=6)
-
-        tk.Label(win, text="Operatsioon").grid(row=2, column=0, sticky="w", padx=8, pady=6)
-        op_var = tk.StringVar(value=op)
-        tk.OptionMenu(win, op_var, "ADD", "SUB", "SET").grid(row=2, column=1, sticky="w", padx=8, pady=6)
-
-        tk.Label(win, text="Kogus m²").grid(row=3, column=0, sticky="w", padx=8, pady=6)
-        qty_var = tk.StringVar(value=str(qty))
-        tk.Entry(win, textvariable=qty_var, width=12).grid(row=3, column=1, sticky="w", padx=8, pady=6)
-
-        status = tk.StringVar(value="")
-        tk.Label(win, textvariable=status, fg="#C62828").grid(row=4, column=0, columnspan=2, sticky="w", padx=8, pady=4)
-
-        def _save_edit():
-            # validate date
-            try:
-                eff_dt = datetime.strptime(eff_var.get().strip(), "%d.%m.%Y").date()
-                eff_iso = eff_dt.isoformat()
-            except Exception:
-                status.set("Kuupäev peab olema dd.mm.yyyy")
-                return
-            # validate qty
-            try:
-                amt = Decimal(str(qty_var.get()).replace(",", "."))
-            except Exception:
-                status.set("Kogus peab olema number")
-                return
-            if amt < 0:
-                status.set("Kogus ei tohi olla negatiivne")
-                return
-            op_choice = op_var.get()
-            typ_new = "manual_add" if op_choice == "ADD" else "manual_sub" if op_choice == "SUB" else "manual_set"
-
-            # apply
-            rec = dict(target)
-            rec["effective_date"] = eff_iso
-            rec["material"] = mat_var.get()
-            rec["type"] = typ_new
-            rec["amount_m2"] = float(amt)
-            ledger[target_idx] = rec
-            data["ledger"] = ledger
-            self._recompute_balances_from_ledger(data)
-            self._save_stock_data(data)
-            self._update_negative_highlight()
-            self._reload_calculations()
-            self._reload_ledger()
-            win.destroy()
-
-        tk.Button(win, text="Salvesta", command=_save_edit).grid(row=5, column=0, padx=8, pady=8, sticky="e")
-        tk.Button(win, text="Loobu", command=win.destroy).grid(row=5, column=1, padx=8, pady=8, sticky="w")
+        target["amount_m2"] = float(amt)
+        self._save_stock_data(data)
+        self._recompute_balances_from_ledger(data)
+        self._update_negative_highlight()
+        self._reload_calculations()
+        self._reload_ledger()
+        self._calc_m2()
+        self._update_calc_button_state()
+        self.status_var.set("Kirje muudetud ja arvestus värskendatud.")
 
     def _apply_stub(self):
         """Фиксируем расчёт месяца: пишем month_calc в журнал, закрываем месяц."""
@@ -1862,7 +1806,7 @@ class MainWindow(tk.Frame):
                     return
                 data["ledger"].append({
                     "ts": ts_now,
-                    "effective_date": dt_to.isoformat(),
+                "effective_date": datetime.now().strftime("%d%m%y"),
                     "period_from": months_covered[0],
                     "period_to": months_covered[-1],
                     "months_covered": months_covered,
@@ -1903,7 +1847,7 @@ class MainWindow(tk.Frame):
                 "month": mkey,
                 "material": "POM Valge",
                 "type": "month_calc",
-                "effective_date": f"{mkey}-01",
+                "effective_date": datetime.now().strftime("%d%m%y"),
                 "amount_m2": float(valge.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)),
                 "note": note
             })
@@ -1913,7 +1857,7 @@ class MainWindow(tk.Frame):
                 "month": mkey,
                 "material": "POM Must",
                 "type": "month_calc",
-                "effective_date": f"{mkey}-01",
+                "effective_date": datetime.now().strftime("%d%m%y"),
                 "amount_m2": float(must.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)),
                 "note": note
             })
