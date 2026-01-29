@@ -32,11 +32,13 @@ class MainWindow(tk.Frame):
         self.period_mode_var = tk.BooleanVar(value=False)
         self.period_from_var = tk.StringVar()
         self.period_to_var = tk.StringVar()
+        # Lao toiming vars
+        self._op_material = tk.StringVar(value="POM Valge")
+        self._op_amount = tk.StringVar(value="0.00")
+        self._op_effective_date = tk.StringVar(value=datetime.now().strftime("%d.%m.%Y"))
         # При изменении значения пересчитываем конвертацию
         self.kerf_mm_var.trace_add("write", lambda *a: self._calc_m2())
         # Окно "Настройка склада" (пересоздаём по мере закрытия)
-        self._stock_win = None
-        self._stock_win_binds = {}
 
 
         # Настройки склада Kumex (минимум: два материала) — пока без логики
@@ -129,23 +131,7 @@ class MainWindow(tk.Frame):
         style.configure("Neg.TEntry", foreground="#C62828")   # тёмно-красный
 
 
-        # Разделитель «-»
-        ttk.Label(container, text="-").grid(row=1, column=1, padx=(64, 0), sticky="w")
-
-        # Ряд 1: Месяц (YYYY-MM)
-        ttk.Label(container, text="Date :").grid(row=1, column=0, sticky="w")
-        # Месяцы 01..12
-        months = [f"{m:02d}" for m in range(1, 13)]
-        cb_month = ttk.Combobox(container, textvariable=self.month_num_var, values=months, width=4, state="readonly")
-        cb_month.grid(row=1, column=1, padx=(80, 0), sticky="w")
-        cb_month.bind("<<ComboboxSelected>>", self._on_date_change)
-        
-        # Годы: текущий-10 … текущий+1
-        current_year = datetime.now().year
-        years = [str(y) for y in range(current_year - 10, current_year + 2)]
-        cb_year = ttk.Combobox(container, textvariable=self.year_var, values=years, width=6, state="readonly")
-        cb_year.grid(row=1, column=1, sticky="w")
-        cb_year.bind("<<ComboboxSelected>>", self._on_date_change)
+        # Ряд 1 (Date) убран: выбор месяца выполняется через блок From/To ниже
 
         # Ряд 2: Папка PDF
         ttk.Label(container, text="PDF kaust:").grid(row=2, column=0, sticky="w", pady=(8, 0))
@@ -207,30 +193,10 @@ class MainWindow(tk.Frame):
         mat_scroll.grid(row=1, column=1, sticky="ns", pady=8)
 
         # --- Таблица "Расчёты" с фильтром по effective_date ---
-        calc_frame = ttk.LabelFrame(container, text="Расчёты (по effective_date)")
+        calc_frame = ttk.LabelFrame(container, text="Расчёты")
         calc_frame.grid(row=6, column=0, columnspan=3, sticky="nsew", pady=(12, 0))
         container.rowconfigure(6, weight=1)
-        calc_frame.columnconfigure(0, weight=0)
-        calc_frame.columnconfigure(1, weight=0)
-        calc_frame.columnconfigure(2, weight=0)
-        calc_frame.columnconfigure(3, weight=1)
-
-        self.calc_month_var = tk.StringVar(value=datetime.now().strftime("%m"))
-        self.calc_year_var = tk.StringVar(value=str(datetime.now().year))
-
-        ttk.Label(calc_frame, text="Aasta:").grid(row=0, column=0, padx=6, pady=4, sticky="w")
-        ttk.Combobox(calc_frame, textvariable=self.calc_year_var,
-                     values=[str(y) for y in range(datetime.now().year - 5, datetime.now().year + 2)],
-                     width=6, state="readonly").grid(row=0, column=1, padx=(0, 12), pady=4, sticky="w")
-
-        ttk.Label(calc_frame, text="Kuu:").grid(row=0, column=2, padx=6, pady=4, sticky="w")
-        ttk.Combobox(calc_frame, textvariable=self.calc_month_var,
-                     values=[f"{m:02d}" for m in range(1, 13)],
-                     width=4, state="readonly").grid(row=0, column=3, padx=(0, 12), pady=4, sticky="w")
-
-        ttk.Button(calc_frame, text="Filtreeri", command=self._reload_calculations)\
-            .grid(row=0, column=4, padx=(0, 8), pady=4, sticky="w")
-
+        calc_frame.columnconfigure(0, weight=1)
         cols_calc = ("eff_date", "material", "op", "qty", "period", "source")
         self.calc_tree = ttk.Treeview(calc_frame, columns=cols_calc, show="headings", height=8)
         self.calc_tree.heading("eff_date", text="Effective date")
@@ -248,9 +214,10 @@ class MainWindow(tk.Frame):
 
         scr_calc = ttk.Scrollbar(calc_frame, orient="vertical", command=self.calc_tree.yview)
         self.calc_tree.configure(yscrollcommand=scr_calc.set)
-        self.calc_tree.grid(row=1, column=0, columnspan=5, sticky="nsew", padx=(6, 0), pady=(4, 6))
-        scr_calc.grid(row=1, column=5, sticky="ns", pady=(4, 6))
-        calc_frame.rowconfigure(1, weight=1)
+        self.calc_tree.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=(4, 2))
+        scr_calc.grid(row=0, column=1, sticky="ns", pady=(4, 2))
+        ttk.Button(calc_frame, text="Clear", command=self._clear_all_state).grid(row=1, column=0, columnspan=2, sticky="e", padx=6, pady=(0, 6))
+        calc_frame.rowconfigure(0, weight=1)
 
         # контекстное меню для расчётов
         self._calc_menu = tk.Menu(self, tearoff=0)
@@ -271,13 +238,34 @@ class MainWindow(tk.Frame):
         for c in range(4):
             cfg_group.columnconfigure(c, weight=0)
 
+        # Форма Lao toiming (перенесена из popup)
+        op_box = ttk.LabelFrame(cfg_group, text="Lao toiming")
+        op_box.grid(row=0, column=0, columnspan=4, sticky="ew", padx=8, pady=(6, 8))
+        op_box.columnconfigure(5, weight=1)
+
+        ttk.Label(op_box, text="Materjal:").grid(row=0, column=0, padx=4, pady=4, sticky="w")
+        ttk.Combobox(op_box, textvariable=self._op_material, state="readonly",
+                     values=("POM Valge", "POM Must"), width=12).grid(row=0, column=1, padx=(0, 8), pady=4, sticky="w")
+
+        ttk.Label(op_box, text="Kogus:").grid(row=0, column=2, padx=4, pady=4, sticky="w")
+        self._op_amount_entry = tk.Entry(op_box, textvariable=self._op_amount, width=12)
+        self._op_amount_entry.grid(row=0, column=3, padx=(0, 4), pady=4, sticky="w")
+        self._op_amount_entry.bind("<Return>", lambda e: (self._add_stock_operation(), "break"))
+        ttk.Label(op_box, text="m²").grid(row=0, column=4, padx=(0, 8), pady=4, sticky="w")
+
+        ttk.Label(op_box, text="Order/Arrival date:").grid(row=1, column=0, padx=4, pady=(0,4), sticky="w")
+        tk.Entry(op_box, textvariable=self._op_effective_date, width=14).grid(row=1, column=1, padx=(0, 8), pady=(0,4), sticky="w")
+
+        ttk.Button(op_box, text="Lisa toiming", command=self._add_stock_operation)\
+            .grid(row=1, column=4, padx=8, pady=(0,4), sticky="e")
+
         # Заголовки
-        ttk.Label(cfg_group, text="Materjal").grid(row=0, column=0, padx=8, pady=(6, 2), sticky="w")
-        ttk.Label(cfg_group, text="Jääk, m²").grid(row=0, column=3, padx=8, pady=(6, 2), sticky="w")
+        ttk.Label(cfg_group, text="Materjal").grid(row=1, column=0, padx=8, pady=(6, 2), sticky="w")
+        ttk.Label(cfg_group, text="Jääk, m²").grid(row=1, column=3, padx=8, pady=(6, 2), sticky="w")
 
         # Ряды по материалам
         # Ряды по материалам ИЗ JSON (с сохранением флага enabled)
-        _row = 1
+        _row = 2
         for name, cfg in self.materials_cfg.items():
             ttk.Label(cfg_group, text=name).grid(row=_row, column=0, padx=8, pady=2, sticky="w")
 
@@ -291,7 +279,6 @@ class MainWindow(tk.Frame):
         btn_row = ttk.Frame(cfg_group)
         btn_row.grid(row=_row, column=0, columnspan=3, sticky="ew", padx=8, pady=(8, 6))
         btn_row.columnconfigure(0, weight=1)
-        ttk.Button(btn_row, text="Lao seaded……", command=self._open_stock_dialog).pack(anchor="center")
 
 
         conv_group = ttk.LabelFrame(bottom_frame, text="Konverteerimine (valitud kuu järgi)")
@@ -346,6 +333,9 @@ class MainWindow(tk.Frame):
                      width=4, state="disabled")
         self._cmb_to_month.grid(row=pm_row+1, column=3, sticky="w", padx=(4,0))
 
+        for _v in (self.period_from_year, self.period_from_month, self.period_to_year, self.period_to_month):
+            _v.trace_add("write", lambda *_a: self._on_period_change())
+
         calc_btn = ttk.Button(conv_group, text="Arvuta", command=self._apply_stub)
         calc_btn.grid(row=pm_row+2, column=0, columnspan=4, sticky="e", padx=8, pady=(10, 6))
         self._calc_btn = calc_btn
@@ -353,125 +343,55 @@ class MainWindow(tk.Frame):
         self._period_widgets = [self._cmb_from_year, self._cmb_from_month, self._cmb_to_year, self._cmb_to_month]
         # ---------------- Служебные обработчики ----------------
 
+        # первичное выравнивание From с прежним Date
+        if self.year_var.get():
+            self.period_from_year.set(self.year_var.get())
+        if self.month_num_var.get():
+            self.period_from_month.set(self.month_num_var.get())
+        self._toggle_period_mode()  # выставить правильные состояния
+        self._on_from_change()
+
     def _toggle_period_mode(self):
         pm = self.period_mode_var.get()
-        state = "readonly" if pm else "disabled"
-        for cmb in getattr(self, "_period_widgets", []):
+        state_to = "readonly" if pm else "disabled"
+        state_from = "readonly"
+        for cmb in (self._cmb_from_year, self._cmb_from_month):
             try:
-                cmb.configure(state=state)
+                cmb.configure(state=state_from)
             except tk.TclError:
                 pass
-
-    # ------------- Архивация журнала -------------
-
-    def _ensure_archive_dir(self):
-        arch = self.state_dir / "archive"
-        arch.mkdir(parents=True, exist_ok=True)
-        return arch
-
-    def _archive_dialog(self):
-        tree = getattr(self, "_ledger_tree", None)
-        if not tree or not tree.winfo_exists():
-            return
-        win = tk.Toplevel(self)
-        win.title("Archive ledger")
-        win.grab_set()
-
-        tk.Label(win, text="Archive until month (YYYY-MM):").grid(row=0, column=0, padx=8, pady=6, sticky="w")
-        until_var = tk.StringVar()
-        tk.Entry(win, textvariable=until_var, width=10).grid(row=0, column=1, padx=8, pady=6, sticky="w")
-
-        sel_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(win, text="Archive selected rows", variable=sel_var).grid(row=1, column=0, columnspan=2, padx=8, pady=4, sticky="w")
-
-        status = tk.StringVar(value="")
-        tk.Label(win, textvariable=status, fg="#C62828").grid(row=2, column=0, columnspan=2, padx=8, pady=4, sticky="w")
-
-        def _do_archive():
-            to_archive = []
-            data = self._load_stock_data()
-            ledger = data.get("ledger", [])
-
-            # selected rows
-            if sel_var.get():
-                sel = tree.selection()
-                idx_map = getattr(self, "_ledger_index", {})
-                for iid in sel:
-                    meta = idx_map.get(iid)
-                    if not meta:
-                        continue
-                    for rec in ledger:
-                        if rec.get("ts") == meta.get("ts") and rec.get("material") == meta.get("material") and rec.get("type") == meta.get("type"):
-                            to_archive.append(rec)
-                            break
-
-            # until month
-            mtext = until_var.get().strip()
-            if mtext:
-                try:
-                    _dt.datetime.strptime(mtext + "-01", "%Y-%m-%d")
-                except Exception:
-                    status.set("Kuupäev peab olema kujul YYYY-MM")
-                    return
-                for rec in ledger:
-                    month = rec.get("month") or ""
-                    if month and month <= mtext and rec not in to_archive:
-                        to_archive.append(rec)
-
-            if not to_archive:
-                status.set("Valige read või sisestage kuu.")
-                return
-
-            arch_dir = self._ensure_archive_dir()
-            fname = arch_dir / f"ledger_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
-            import json
-            with fname.open("w", encoding="utf-8") as f:
-                for rec in to_archive:
-                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-
-            # удалить их из ledger
-            data["ledger"] = [r for r in ledger if r not in to_archive]
-            # пересчитать closed_months (month_calc)
-            data["closed_months"] = sorted({r.get("month") for r in data["ledger"] if r.get("type") == "month_calc" and r.get("month")})
-            self._recompute_balances_from_ledger(data)
-            self._save_stock_data(data)
-            self._update_negative_highlight()
-            self._reload_ledger()
-            self._reload_calculations()
-            status.set(f"Arhiveeritud: {len(to_archive)}, fail: {fname.name}")
-
-        tk.Button(win, text="Archive", command=_do_archive).grid(row=3, column=0, padx=8, pady=8, sticky="e")
-        tk.Button(win, text="Close", command=win.destroy).grid(row=3, column=1, padx=8, pady=8, sticky="w")
-
-    def _open_archive_viewer(self):
-        arch_dir = self._ensure_archive_dir()
-        files = sorted(arch_dir.glob("ledger_*.jsonl"))
-        win = tk.Toplevel(self)
-        win.title("Archive viewer")
-        win.geometry("640x400")
-        win.grab_set()
-
-        listbox = tk.Listbox(win, height=10)
-        listbox.pack(side="left", fill="y", padx=8, pady=8)
-        for f in files:
-            listbox.insert(tk.END, f.name)
-
-        txt = tk.Text(win, wrap="none")
-        txt.pack(side="right", fill="both", expand=True, padx=8, pady=8)
-
-        def _on_select(evt=None):
-            sel = listbox.curselection()
-            if not sel:
-                return
-            fname = files[sel[0]]
+        for cmb in (self._cmb_to_year, self._cmb_to_month):
             try:
-                content = fname.read_text(encoding="utf-8")
-            except Exception as e:
-                content = f"Viga: {e}"
-            txt.delete("1.0", tk.END)
-            txt.insert(tk.END, content)
+                cmb.configure(state=state_to)
+            except tk.TclError:
+                pass
+        # сразу пересчитать вывод в зависимости от режима
+        if pm:
+            self._calc_m2()
+        else:
+            self._on_from_change()
 
-        listbox.bind("<<ListboxSelect>>", _on_select)
+    def _on_period_change(self, *_):
+        """Автопересчёт периода при изменении From/To."""
+        if self.period_mode_var.get():
+            self._calc_m2()
+        else:
+            self._on_from_change()
+
+    def _on_from_change(self, *_):
+        """В месячном режиме: From работает как Date; в периодическом — ничего не делаем."""
+        if self.period_mode_var.get():
+            return
+        # синхронизируем «Date» (отключён) для совместимости с существующей логикой
+        self.year_var.set(self.period_from_year.get())
+        self.month_num_var.set(self.period_from_month.get())
+        self._sync_month_var()
+        self._scan_pdfs()
+        self._update_calc_button_state()
+
+    # Архивация временно отключена
+    def _open_archive_viewer(self):
+        messagebox.showinfo("Archive", "Архивация отключена в отладочном режиме.")
 
     def _choose_pdf_dir(self):
         initial = self.pdf_dir_var.get() or (self.state_dir / "input_pdf").as_posix()
@@ -651,10 +571,116 @@ class MainWindow(tk.Frame):
         self._set_status(f"Töödeldud PDF: {len(self.pdf_files)} | Leitud positsioone: {total}")
         self._calc_m2()
 
+    def _collect_material_rows_for_month(self, yy: int, mm: int):
+        """Собирает строки материалов для заданного месяца, не трогая UI."""
+        try:
+            folder = Path(self.pdf_dir_var.get())
+        except Exception:
+            return []
+        if not folder.exists():
+            return []
+
+        mm_str = f"{mm:02d}"
+        start_ts = time.mktime((yy, mm, 1, 0, 0, 0, 0, 0, -1))
+        if mm == 12:
+            end_ts = time.mktime((yy + 1, 1, 1, 0, 0, 0, 0, 0, -1))
+        else:
+            end_ts = time.mktime((yy, mm + 1, 1, 0, 0, 0, 0, 0, -1))
+
+        pdfs = []
+        for p in folder.glob("*.pdf"):
+            try:
+                mtime = p.stat().st_mtime
+            except Exception:
+                continue
+            if start_ts <= mtime < end_ts:
+                pdfs.append(p)
+
+        rows = []
+        if not pdfs:
+            return rows
+
+        # паттерны как в _parse_materials
+        size_rx = re.compile(r"\b\d+\s*([xX*])\s*\d+(?:\s*\1\s*\d+)?(?:\s*mm\b)?")
+        qty_any_rx = re.compile(r"\b(?:qty|quantity)\s*[:=]?\s*(\d{1,7})\b", re.IGNORECASE)
+        qty_row_above_rx = re.compile(r"^\s*\d+\s+\S+\s+(\d{1,7})\b")
+        po_rx = re.compile(r"\bPO(?:\s*(?:Number|No\.?)|)\s*[:#]?\s*([A-Za-z0-9_-]+)")
+        date_rx = re.compile(r"\b(?:Order\s*Date|Date)\s*[:#]?\s*([0-9]{1,2}[.\-/][0-9]{1,2}[.\-/][0-9]{2,4})")
+
+        for p in pdfs:
+            text = read_pdf_text(str(p))
+            if not text:
+                continue
+
+            po = (po_rx.search(text).group(1) if po_rx.search(text) else "?")
+            od = (date_rx.search(text).group(1) if date_rx.search(text) else "?")
+
+            lines = [ln.strip() for ln in text.splitlines()]
+            n = len(lines)
+
+            for i, line in enumerate(lines):
+                if not size_rx.search(line):
+                    continue
+
+                desc = line
+                qty = None
+                qty_text = ""
+
+                m = qty_any_rx.search(line)
+                if m:
+                    qty = int(m.group(1))
+                    qty_text = line
+
+                if qty is None:
+                    for j in range(1, 4):
+                        if i + j >= n:
+                            break
+                        m = qty_any_rx.search(lines[i + j])
+                        if m:
+                            qty = int(m.group(1))
+                            qty_text = lines[i + j]
+                            break
+
+                if qty is None:
+                    for j in (1, 2):
+                        if i - j >= 0:
+                            m = qty_row_above_rx.match(lines[i - j])
+                            if m:
+                                qty = int(m.group(1))
+                                qty_text = lines[i - j]
+                                break
+
+                if qty is None:
+                    continue
+
+                uom = "mm" if qty >= 1000 else "tk"
+                if uom == "tk":
+                    qty_ctx = f"{desc}\n{qty_text}"
+                    if re.search(rf"{qty}\s*mm\b", qty_ctx, re.IGNORECASE):
+                        uom = "mm"
+
+                d = desc.lower()
+                if "pom" in d and "valge" in d:
+                    mat_name = "POM Valge"
+                elif "pom" in d and ("must" in d or "õhuke" in d or "Ãµhuke" in d):
+                    mat_name = "POM Must"
+                else:
+                    mat_name = ""
+
+                rows.append({
+                    "desc": desc,
+                    "qty": qty,
+                    "uom": uom,
+                    "po": po,
+                    "date": od,
+                    "material": mat_name
+                })
+
+        return rows
+
     def _on_date_change(self, *_):
-        self._sync_month_var()
-        self._scan_pdfs()
-        self._update_calc_button_state()
+        # устарело: дата теперь задаётся через From; оставлено для совместимости вызовов
+        self._on_from_change()
 
     def _report_stub(self):
         # Заглушка: здесь позже будет агрегатор + генерация отчёта
@@ -716,6 +742,197 @@ class MainWindow(tk.Frame):
 
         S_plate = Decimal(PLATE_W_MM * PLATE_L_MM) / Decimal(1_000_000)
         layers_per_plate = PLATE_L_MM // cut_len
+
+        def _compute_totals(rows):
+            """Pure calculation for a given set of parsed rows (no UI side effects)."""
+            local_results = {}
+            local_issues = []
+            local_plan_layers = []
+
+            def add_issue(material, dims, uom, qty, code, detail):
+                local_issues.append({
+                    'material': material,
+                    'dims': dims,
+                    'uom': uom,
+                    'qty': qty,
+                    'issue_code': code,
+                    'issue_detail': detail,
+                })
+
+            def parse_dims(desc: str):
+                nums = [int(x) for x in re.findall(r'\d+', desc)]
+                if len(nums) < 3:
+                    return []
+                return sorted(nums, reverse=True)[:3]
+
+            items_by_mat = {m: [] for m in ('POM Valge', 'POM Must')}
+            for row in rows:
+                mat = row.get('material', '')
+                if mat not in items_by_mat:
+                    continue
+                uom = str(row.get('uom', 'tk') or 'tk')
+                try:
+                    qty = int(row.get('qty', 0) or 0)
+                except Exception:
+                    qty = 0
+                dims = parse_dims(str(row.get('desc', '')))
+                if qty <= 0:
+                    add_issue(mat, dims, uom, qty, 'ISSUE_QTY_NON_POSITIVE', 'Qty must be positive')
+                    continue
+                if len(dims) < 3:
+                    add_issue(mat, dims, uom, qty, 'ISSUE_NO_DIM_LE_BASE_THICKNESS', 'Need three dimensions')
+                    continue
+                items_by_mat[mat].append({'dims': dims, 'qty': qty, 'uom': uom})
+
+            for mat, items in items_by_mat.items():
+                strips_widths = []
+                s_ideal_sum = Decimal('0')
+                waste_width_sum = Decimal('0')
+                waste_thickness_sum = Decimal('0')
+                for item in items:
+                    dims = item['dims']
+                    qty = item['qty']
+                    uom = item['uom']
+
+                    candidates = [d for d in dims if d <= BASE_THICKNESS_MM]
+                    if not candidates:
+                        add_issue(mat, dims, uom, qty, 'ISSUE_NO_DIM_LE_BASE_THICKNESS', 'All dimensions exceed base thickness')
+                        continue
+                    t = max(candidates)
+                    rem = dims.copy()
+                    rem.remove(t)
+                    rem_sorted = sorted(rem, reverse=True)
+                    if len(rem_sorted) < 2:
+                        add_issue(mat, dims, uom, qty, 'ISSUE_NO_FEASIBLE_ORIENTATION', 'Not enough sides for footprint')
+                        continue
+                    p, q = rem_sorted[:2]
+
+                    def _add_kerf(dim: Decimal) -> Decimal:
+                        return dim if dim == Decimal(cut_len) else dim + kerf
+
+                    p_eff = _add_kerf(Decimal(p))
+                    q_eff = _add_kerf(Decimal(q))
+                    orientations = []
+                    width_issue = False
+
+                    for w, L in ((p_eff, q_eff), (q_eff, p_eff)):
+                        if w > PLATE_W_MM:
+                            width_issue = True
+                            continue
+                        if L > cut_len:
+                            continue
+                        if uom == 'tk':
+                            k = int(Decimal(cut_len) // Decimal(L))
+                            if k <= 0:
+                                continue
+                            strips = (qty + k - 1) // k
+                            W_demand = strips * w
+                            L_waste = Decimal(strips * cut_len) - Decimal(qty) * Decimal(L)
+                            S_ideal = (Decimal(strips) * Decimal(w) * Decimal(cut_len)) / Decimal(1_000_000)
+                        else:
+                            w_use = min(w, q_eff, p_eff)
+                            strips = (qty + cut_len - 1) // cut_len
+                            W_demand = strips * w_use
+                            L_waste = Decimal(strips * cut_len - qty)
+                            S_ideal = (Decimal(strips) * Decimal(w_use) * Decimal(cut_len)) / Decimal(1_000_000)
+                            w = w_use
+                        orientations.append((W_demand, L_waste, Decimal(BASE_THICKNESS_MM - t), w, strips, S_ideal))
+                    if not orientations:
+                        if width_issue:
+                            add_issue(mat, dims, uom, qty, 'ISSUE_WIDTH_GT_PLATE', f'w > {PLATE_W_MM}')
+                        add_issue(mat, dims, uom, qty, 'ISSUE_NO_FEASIBLE_ORIENTATION', 'No orientation fits plate/cut length')
+                        continue
+
+                    orientations.sort(key=lambda x: (x[0], x[1], x[2]))
+                    _, _, _, w_sel, strips, S_ideal = orientations[0]
+                    s_ideal_sum += S_ideal
+                    strips_widths.extend([float(w_sel)] * int(strips))
+
+                    if t < BASE_THICKNESS_MM:
+                        waste_thickness_sum += (Decimal(BASE_THICKNESS_MM - t) * Decimal(p) * Decimal(q) * qty)
+
+                layers = []
+                for w in sorted(strips_widths, reverse=True):
+                    placed = False
+                    for layer in layers:
+                        if sum(layer) + w <= PLATE_W_MM:
+                            layer.append(w)
+                            placed = True
+                            break
+                    if not placed:
+                        layers.append([w])
+
+                for idx, layer in enumerate(layers, start=1):
+                    remaining = PLATE_W_MM - sum(layer)
+                    local_plan_layers.append({
+                        'material': mat,
+                        'layer_id': idx,
+                        'remaining_width_mm': remaining,
+                        'strip_widths': layer,
+                    })
+                    waste_width_sum += Decimal(remaining)
+
+                layers_used = len(layers)
+                plates_used = (layers_used + layers_per_plate - 1) // layers_per_plate
+                plates_left = STOCK_PLATES - plates_used
+                s_used = Decimal(plates_used) * S_plate
+                s_left = Decimal(max(plates_left, 0)) * S_plate
+                s_waste_width = (waste_width_sum * Decimal(cut_len)) / Decimal(1_000_000)
+
+                local_results[mat] = {
+                    'layers_used': layers_used,
+                    'plates_used': plates_used,
+                    'plates_left': plates_left,
+                    'm2_used': s_used,
+                    'm2_left': s_left,
+                    'layers_per_plate': layers_per_plate,
+                    's_ideal_sum': s_ideal_sum,
+                    'waste_width_m2': s_waste_width,
+                    'waste_thickness_mm3': waste_thickness_sum,
+                }
+
+            return local_results, local_plan_layers, local_issues
+
+        # Если включён Period mode — считаем каждый месяц как в месячном режиме (PDF → konverteerimine), потом суммируем
+        if self.period_mode_var.get():
+            try:
+                dt_from = datetime(int(self.period_from_year.get()), int(self.period_from_month.get()), 1).date()
+                dt_to = datetime(int(self.period_to_year.get()), int(self.period_to_month.get()), 1).date()
+            except Exception:
+                self._set_status("Perioodi kuupäevad vigased")
+                return
+            # список месяцев в диапазоне
+            months = []
+            cur = dt_from
+            while cur <= dt_to:
+                months.append((cur.year, cur.month))
+                if cur.month == 12:
+                    cur = datetime(cur.year + 1, 1, 1).date()
+                else:
+                    cur = datetime(cur.year, cur.month + 1, 1).date()
+
+            sums = {"POM Valge": Decimal("0"), "POM Must": Decimal("0")}
+            processed = 0
+            for yy, mm in months:
+                rows = self._collect_material_rows_for_month(yy, mm)
+                if not rows:
+                    continue
+                res, _, _ = _compute_totals(rows)
+                for mat in ("POM Valge", "POM Must"):
+                    if mat in res:
+                        sums[mat] += res[mat]['s_ideal_sum']
+                processed += 1
+
+            for mat in ("POM Valge", "POM Must"):
+                self.conv_totals[mat].set(f"{sums[mat].quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)}")
+
+            if processed == 0:
+                self._set_status("Perioodis PDF-e ei leitud")
+            else:
+                m_first = f"{months[0][0]}-{months[0][1]:02d}"
+                m_last = f"{months[-1][0]}-{months[-1][1]:02d}"
+                self._set_status(f"Perioodi summa (PDF -> konverteerimine): {m_first}…{m_last}")
+            return
 
         issues = []
         plan_layers_rows = []
@@ -878,233 +1095,9 @@ class MainWindow(tk.Frame):
         self._write_reports(results, plan_layers_rows, issues)
 
     def _write_reports(self, results, plan_layers_rows, issues):
-        """Save summary, layer plan, and issues to files."""
-        import json
-        import csv
+        """Отладочный режим: не сохраняем отчёты на диск."""
+        return
 
-        report_dir = self.state_dir / 'reports'
-        report_dir.mkdir(parents=True, exist_ok=True)
-
-        summary_rows = []
-        for mat, res in results.items():
-            summary_rows.append({
-                'material': mat,
-                'plates_used': res.get('plates_used', 0),
-                'm2_used': float(res.get('m2_used', 0)),
-                'plates_left': res.get('plates_left', 0),
-                'm2_left': float(res.get('m2_left', 0)),
-                'layers_used': res.get('layers_used', 0),
-                'layers_per_plate': res.get('layers_per_plate', 0),
-
-                's_ideal_sum': float(res.get('s_ideal_sum', 0)),
-                'waste_width_m2': float(res.get('waste_width_m2', 0)),
-            })
-
-        ts_label = datetime.now().strftime("%Y%m%d_%H%M%S")
-        (report_dir / f'summary_{ts_label}.json').write_text(json.dumps(summary_rows, ensure_ascii=False, indent=2), encoding='utf-8')
-        if summary_rows:
-            fieldnames = sorted({k for row in summary_rows for k in row.keys()})
-            with (report_dir / f'summary_{ts_label}.csv').open('w', newline='', encoding='utf-8') as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-                writer.writeheader()
-                writer.writerows(summary_rows)
-
-        if plan_layers_rows:
-            with (report_dir / f'plan_layers_{ts_label}.csv').open('w', newline='', encoding='utf-8') as f:
-                fieldnames = sorted({k for row in plan_layers_rows for k in row.keys()})
-                writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-                writer.writeheader()
-                for row in plan_layers_rows:
-                    writer.writerow(row)
-
-        with (report_dir / 'issues.csv').open('w', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=['material', 'dims', 'uom', 'qty', 'issue_code', 'issue_detail'])
-            writer.writeheader()
-            for row in issues:
-                writer.writerow(row)
-
-
-    def _open_stock_dialog(self):
-        """Открывает окно 'Настройка склада' с таблицей журнала операций."""
-        if self._stock_win and tk.Toplevel.winfo_exists(self._stock_win):
-            self._stock_win.focus_set()
-            return
-
-        self._stock_win = tk.Toplevel(self.master)
-        self._stock_win.withdraw()  # спрятать до настройки
-        self._stock_win.title("Lao seaded… ")
-        self._stock_win.transient(self.master)
-        self._stock_win.geometry("720x420")
-
-        def _release_modal_grab(_=None):
-            try:
-                self._stock_win.grab_release()
-            except Exception:
-                pass
-
-        def _restore_modal_grab(_=None):
-            if self._stock_win and tk.Toplevel.winfo_exists(self._stock_win):
-                try:
-                    self._stock_win.grab_set()
-                except Exception:
-                    pass
-
-        # Следим за сворачиванием/разворачиванием, чтобы не оставлять grab на скрытом окне
-        self._stock_win_binds = {
-            "master_unmap": self.master.bind("<Unmap>", _release_modal_grab, add="+"),
-            "master_map": self.master.bind("<Map>", _restore_modal_grab, add="+"),
-            "stock_unmap": self._stock_win.bind("<Unmap>", _release_modal_grab, add="+"),
-            "stock_map": self._stock_win.bind("<Map>", _restore_modal_grab, add="+"),
-        }
-
-        def _on_close():
-            try:
-                self._stock_win.grab_release()
-            except Exception:
-                pass
-            try:
-                binds = self._stock_win_binds or {}
-                if binds.get("master_unmap"):
-                    self.master.unbind("<Unmap>", binds["master_unmap"])
-                if binds.get("master_map"):
-                    self.master.unbind("<Map>", binds["master_map"])
-                if binds.get("stock_unmap"):
-                    self._stock_win.unbind("<Unmap>", binds["stock_unmap"])
-                if binds.get("stock_map"):
-                    self._stock_win.unbind("<Map>", binds["stock_map"])
-            except Exception:
-                pass
-            self._stock_win_binds = {}
-            self._stock_win.destroy()
-            self._stock_win = None
-
-        self._stock_win.protocol("WM_DELETE_WINDOW", _on_close)
-
-                # Корневой фрейм
-        frm = ttk.Frame(self._stock_win)
-        frm.pack(fill="both", expand=True, padx=10, pady=10)
-
-        # ===== ФОРМА ОПЕРАЦИИ (+/- м²) =====
-        op_box = ttk.LabelFrame(frm, text="Lao toiming")
-        op_box.pack(fill="x", padx=0, pady=(0, 8))
-
-        # переменные формы
-        self._op_material = tk.StringVar(value="POM Valge")
-        self._op_amount = tk.StringVar(value="0.00")
-        self._op_effective_date = tk.StringVar(value=datetime.now().strftime("%d.%m.%Y"))
-
-        ttk.Label(op_box, text="Materjal:").grid(row=0, column=0, padx=8, pady=6, sticky="w")
-        ttk.Combobox(op_box, textvariable=self._op_material, state="readonly",
-                    values=("POM Valge", "POM Must"), width=12).grid(row=0, column=1, padx=(0, 8), pady=6, sticky="w")
-
-        ttk.Label(op_box, text="Kogus:").grid(row=0, column=2, padx=8, pady=6, sticky="w")
-        self._op_amount_entry = tk.Entry(op_box, textvariable=self._op_amount, width=12)
-        self._op_amount_entry.grid(row=0, column=3, padx=(0, 4), pady=6, sticky="w")
-        ttk.Label(op_box, text="m²").grid(row=0, column=4, padx=(0, 8), pady=6, sticky="w")
-
-        ttk.Label(op_box, text="Order/Arrival date:").grid(row=1, column=0, padx=8, pady=(0, 6), sticky="w")
-        ttk.Entry(op_box, textvariable=self._op_effective_date, width=14).grid(row=1, column=1, padx=(0, 8), pady=(0, 6), sticky="w")
-
-        # даём пространство перед кнопкой добавления
-        op_box.columnconfigure(3, weight=1)
-
-        ttk.Button(op_box, text="Lisa toiming", command=self._add_stock_operation)\
-        .grid(row=1, column=4, padx=8, pady=(0, 6), sticky="e")
-
-
-        # Колонки: растягиваем пространство между радиокнопками и кнопкой
-        for i in range(9):
-            op_box.columnconfigure(i, weight=0)
-        op_box.columnconfigure(7, weight=1)   # даёт место заголовку «Тип действия» и кнопке справа
-        # чтобы поле комментария имело место
-
-        # ===== УДАЛЕНИЕ РАСЧЁТА МЕСЯЦА =====
-        rm_box = ttk.LabelFrame(frm, text="Kustuta kuu arvestus")
-        rm_box.pack(fill="x", padx=0, pady=(0, 8))
-
-        self._rm_year = tk.StringVar(value=self.year_var.get())
-        self._rm_month = tk.StringVar(value=self.month_num_var.get())
-
-        ttk.Label(rm_box, text="Aasta:").grid(row=0, column=0, padx=8, pady=6, sticky="w")
-        ttk.Combobox(rm_box, textvariable=self._rm_year, values=[str(y) for y in range(2017, 2031)],
-                    state="readonly", width=6).grid(row=0, column=1, padx=(0, 8), pady=6, sticky="w")
-        ttk.Label(rm_box, text="Kuu:").grid(row=0, column=2, padx=8, pady=6, sticky="w")
-        ttk.Combobox(rm_box, textvariable=self._rm_month, values=[f"{m:02d}" for m in range(1, 13)],
-                    state="readonly", width=4).grid(row=0, column=3, padx=(0, 8), pady=6, sticky="w")
-
-        ttk.Button(rm_box, text="Kustuta kuu arvestus", command=self._delete_month_calc)\
-            .grid(row=0, column=4, padx=8, pady=6, sticky="e")
-
-        rm_box.columnconfigure(5, weight=1)
-
-        # ===== ЖУРНАЛ ОПЕРАЦИЙ =====
-        topbar = ttk.Frame(frm)
-        topbar.pack(fill="x", pady=(6, 0))
-        ttk.Label(topbar, text="Lao toimingute logi").pack(side="left")
-        ttk.Button(topbar, text="Archive…", command=self._archive_dialog).pack(side="right", padx=(4, 0))
-        ttk.Button(topbar, text="View archive", command=self._open_archive_viewer).pack(side="right", padx=(4, 0))
-
-        cols = ("ts", "month", "material", "action", "amount", "note")
-        self._ledger_tree = ttk.Treeview(frm, columns=cols, show="headings", height=12)
-        self._ledger_tree.heading("ts", text="Kuupäev/aeg")
-        self._ledger_tree.heading("month", text="Kuu")
-        self._ledger_tree.heading("material", text="Materjal")
-        self._ledger_tree.heading("action", text="Toiming")
-        self._ledger_tree.heading("amount", text="m²")
-        self._ledger_tree.heading("note", text="Kommentaar")
-
-        self._ledger_tree.column("ts", width=140, anchor="center")
-        self._ledger_tree.column("month", width=80, anchor="center")
-        self._ledger_tree.column("material", width=120, anchor="w")
-        self._ledger_tree.column("action", width=120, anchor="w")
-        self._ledger_tree.column("amount", width=80, anchor="center")
-        self._ledger_tree.column("note", width=220, anchor="w")
-        
-        # Цветовые теги для строк журнала
-        self._ledger_tree.tag_configure("t_add",   foreground="#0A7D00")  # зелёный  (пополнение)
-        self._ledger_tree.tag_configure("t_sub",   foreground="#A40000")  # красный  (списание)
-        self._ledger_tree.tag_configure("t_month", foreground="#004A9F")  # синий    (расчёт месяца/периода)
-        self._ledger_tree.tag_configure("t_set",   foreground="#6A1B9A")  # фиолетовый (установка)
-        self._ledger_tree.tag_configure("t_calc",  foreground="#004A9F")
-
-        scr = ttk.Scrollbar(frm, orient="vertical", command=self._ledger_tree.yview)
-        self._ledger_tree.configure(yscrollcommand=scr.set)
-        self._ledger_tree.pack(side="left", fill="both", expand=True, pady=(6, 0))
-        scr.pack(side="left", fill="y", pady=(6, 0))
-
-        # статус внизу
-        self._stock_status = tk.StringVar(value="")
-        ttk.Label(self._stock_win, textvariable=self._stock_status).pack(fill="x", padx=10, pady=(6, 10))
-
-        # загрузка данных в таблицу
-        self._reload_ledger()
-        
-        # --- центрирование окна "Настройка склада" над главным окном ---
-        # --- центрирование без мигания ---
-        # посчитать нужные размеры, окно пока скрыто
-        self._stock_win.update_idletasks()
-
-        # геометрия главного окна
-        px = self.winfo_rootx()
-        py = self.winfo_rooty()
-        pw = self.winfo_width()
-        ph = self.winfo_height()
-
-        # запрошенные размеры диалога (точнее, чем winfo_width/height для скрытого окна)
-        ww = self._stock_win.winfo_reqwidth()
-        wh = self._stock_win.winfo_reqheight()
-
-        # позиция по центру главного окна
-        x = px + (pw - ww) // 2
-        y = py + (ph - wh) // 2
-
-        # сперва выставляем геометрию, а уже потом показываем окно
-        self._stock_win.geometry(f"+{x}+{y}")
-        self._stock_win.transient(self.master)
-        self._stock_win.deiconify()        # ← показать окно (теперь уже по центру)
-        self._stock_win.grab_set()         # если у тебя был grab_set — оставь
-        self._stock_win.focus_set()
-        # --- конец центрирования ---
 
     def _load_stock_data(self):
         """Гарантированно читаем JSON структуры склада."""
@@ -1250,37 +1243,11 @@ class MainWindow(tk.Frame):
         
         # обновим GUI
         self._reload_ledger()
-        self._stock_status.set("Toiming lisatud.")
+        self.status_var.set("Toiming lisatud.")
 
     def _delete_month_calc(self):
         """Удалить все записи type=month_calc за выбранный месяц и пересчитать остатки."""
-        import datetime as _dt
-
-        yy = str(self._rm_year.get())
-        mm = str(self._rm_month.get())
-        month = f"{yy}-{mm}"
-
-        if not messagebox.askyesno("Kinnitus", f"Kas kustutada kuu {month} arvestus?"):
-            return
-
-        data = self._load_stock_data()
-        # удалить month_calc за месяц
-        before = len(data.get("ledger", []))
-        data["ledger"] = [r for r in data.get("ledger", []) if not (r.get("type") == "month_calc" and r.get("month") == month)]
-        after = len(data["ledger"])
-
-        # убрать месяц из закрытых
-        if "closed_months" in data and month in data["closed_months"]:
-            data["closed_months"].remove(month)
-
-        # пересчёт и сохранение
-        self._recompute_balances_from_ledger(data)
-        self._save_stock_data(data)
-        self._update_negative_highlight()
-
-        self._reload_ledger()
-        self._stock_status.set(f"Kustutatud kirjeid: {before - after}.")
-        self._update_calc_button_state()
+        messagebox.showinfo("Info", "Kuu arvestuse kustutamine pole enam saadaval.")
 
     def _undo_selected(self):
         """Инвертировать выбранную запись журнала (manual_add <-> manual_sub)."""
@@ -1341,7 +1308,7 @@ class MainWindow(tk.Frame):
         
         # Обновление UI
         self._reload_ledger()
-        self._stock_status.set("Lisatud vastupidine korrigeerimine.")
+        self.status_var.set("Lisatud vastupidine korrigeerimine.")
 
     def _reload_ledger(self):
         """Читает ledger из JSON и перерисовывает таблицу журнала."""
@@ -1350,19 +1317,13 @@ class MainWindow(tk.Frame):
             ledger = data.get("ledger", []) or []
         except Exception as e:
             ledger = []
-            if hasattr(self, "_stock_status"):
-                self._stock_status.set(f"Viga чтения JSON: {e}")
+            self.status_var.set(f"Viga чтения JSON: {e}")
         # Маппинг iid -> «сырые» значения для undo
         self._ledger_index = {}
         
         # дерево журнала может не существовать (диалог закрыт)
         tree = getattr(self, "_ledger_tree", None)
         tree_exists = bool(tree) and tree.winfo_exists()
-
-        status_var = getattr(self, "_stock_status", None)
-        stock_win_alive = bool(getattr(self, "_stock_win", None)) and \
-                        tk.Toplevel.winfo_exists(getattr(self, "_stock_win"))
-
 
         if tree_exists:
             for iid in tree.get_children():
@@ -1461,8 +1422,7 @@ class MainWindow(tk.Frame):
 
 
 
-        if status_var is not None and stock_win_alive:
-            status_var.set(f"Kirjeid logis: {cnt}")
+        # статус был в popup; при удалении попапа опускаем
             
     def _update_negative_highlight(self):
         """Покрасить отрицательные остатки и показать предупреждение в статусе."""
@@ -1504,7 +1464,7 @@ class MainWindow(tk.Frame):
 
     def _month_key(self) -> str:
         """Ключ месяца вида YYYY-MM из текущих комбобоксов."""
-        return f"{self.year_var.get()}-{self.month_num_var.get()}"
+        return f"{self.period_from_year.get()}-{self.period_from_month.get()}"
 
     def _update_calc_button_state(self):
         """Включить/выключить кнопку 'Рассчитать' в зависимости от закрытого месяца."""
@@ -1540,9 +1500,6 @@ class MainWindow(tk.Frame):
         for iid in tree.get_children():
             tree.delete(iid)
 
-        year = self.calc_year_var.get().strip()
-        month = self.calc_month_var.get().strip()
-
         data = self._load_stock_data()
         ledger = data.get("ledger", []) or []
 
@@ -1563,18 +1520,17 @@ class MainWindow(tk.Frame):
                     pass
             return None
 
-        filtered = []
+        mat_order = {"POM Valge": 0, "POM Must": 1}
+        rows = []
         for rec in ledger:
             d = _parse_eff(rec)
             if not d:
                 continue
-            if d.year == int(year) and f"{d.month:02d}" == month:
-                filtered.append((d, rec))
+            rows.append((d, rec))
 
-        # сортировка по effective_date
-        filtered.sort(key=lambda x: x[0])
+        rows.sort(key=lambda x: (x[0], mat_order.get(x[1].get("material",""), 99), x[1].get("material","")))
 
-        for idx, (d, rec) in enumerate(filtered):
+        for idx, (d, rec) in enumerate(rows):
             typ_raw = (rec.get("type") or "").lower()
             if typ_raw == "manual_add":
                 op = "ADD"
@@ -1583,9 +1539,9 @@ class MainWindow(tk.Frame):
             elif typ_raw == "manual_set":
                 op = "SET"
             elif typ_raw == "month_calc":
-                op = "CALC_DEDUCT"
+                op = "Arvestatud"
             elif typ_raw == "calc_deduct":
-                op = "CALC_DEDUCT"
+                op = "Arvestatud"
             else:
                 op = typ_raw.upper() if typ_raw else ""
 
@@ -1629,6 +1585,27 @@ class MainWindow(tk.Frame):
         tree.tag_configure("manual_set", foreground="#6A1B9A")
         tree.tag_configure("month_calc", foreground="#004A9F")
         tree.tag_configure("calc_deduct", foreground="#004A9F")
+
+    def _clear_all_state(self):
+        """Полная очистка для отладки: удаляем ledger, закрытые месяцы, очищаем таблицы."""
+        data = self._load_stock_data()
+        data["ledger"] = []
+        data["closed_months"] = []
+        # сброс остатков к stock_m3 (или 0, если не задано)
+        for mat, rec in data.get("materials", {}).items():
+            base = float(rec.get("stock_m3", rec.get("remain_m3", 0.0)))
+            rec["remain_m3"] = base
+            if mat in self.materials_cfg:
+                self.materials_cfg[mat]["remain_m3"].set(f"{base:.2f}")
+        self._save_stock_data(data)
+        self._reload_ledger()
+        tree = getattr(self, "calc_tree", None)
+        if tree and tree.winfo_exists():
+            for iid in tree.get_children():
+                tree.delete(iid)
+        self._update_negative_highlight()
+        self._update_calc_button_state()
+        self.status_var.set("Ledger ja arvestused puhastatud (debug)")
 
     def _on_calc_context(self, event):
         tree = getattr(self, "calc_tree", None)
@@ -1902,9 +1879,6 @@ class MainWindow(tk.Frame):
             self._save_stock_data(data)
             self._update_negative_highlight()
             self._reload_ledger()
-            # показать расчёт в таблице за месяц окончания периода
-            self.calc_year_var.set(str(dt_to.year))
-            self.calc_month_var.set(f"{dt_to.month:02d}")
             self._reload_calculations()
             self._update_calc_button_state()
             self.status_var.set(f"Periood salvestatud: {months_covered[0]}…{months_covered[-1]}")
@@ -1959,8 +1933,6 @@ class MainWindow(tk.Frame):
 
         # Обновить журнал (если окно открыто) и заблокировать кнопку
         self._reload_ledger()
-        self.calc_year_var.set(self.year_var.get())
-        self.calc_month_var.set(self.month_num_var.get())
         self._reload_calculations()
         self._update_calc_button_state()
         messagebox.showinfo("Valmis", f"Kuu {mkey} arvestus on salvestatud.")
