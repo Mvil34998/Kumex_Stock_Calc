@@ -99,6 +99,9 @@ class MainWindow(tk.Frame):
         # Храним фактическое списание (m2_used по плитам), чтобы Ledger брал реальные значения, а в UI можно показывать идеальную потребность
         self._m2_used_totals = {name: Decimal("0.00") for name in self.materials_cfg.keys()}
         # Отходы по ширине (м²)
+        self._calc_iid_to_uid = {}
+        # Флаги списания по материалам (Arvuta)
+        self.deduct_flags = {name: tk.BooleanVar(value=True) for name in self.materials_cfg.keys()}
 
 
         # --- переменные GUI ---
@@ -286,6 +289,7 @@ class MainWindow(tk.Frame):
         conv_group.columnconfigure(0, weight=0)
         conv_group.columnconfigure(1, weight=0)
         conv_group.columnconfigure(2, weight=0)
+        conv_group.columnconfigure(3, weight=0)
         # Conversion totals (read-only)
         _row_conv = 0
         for name in self.conv_totals.keys():
@@ -293,6 +297,7 @@ class MainWindow(tk.Frame):
             ttk.Label(conv_group, text=f"{name}:").grid(row=_row_conv, column=0, padx=8, pady=pad_top, sticky="w")
             ttk.Entry(conv_group, textvariable=self.conv_totals[name], width=10, state="readonly").grid(row=_row_conv, column=1, padx=(8, 2), pady=pad_top, sticky="w")
             ttk.Label(conv_group, text="m²").grid(row=_row_conv, column=2, padx=(0, 8), pady=pad_top, sticky="w")
+            ttk.Checkbutton(conv_group, variable=self.deduct_flags[name]).grid(row=_row_conv, column=3, padx=(0, 8), pady=pad_top, sticky="w")
             _row_conv += 1
 
         kerf_row = _row_conv + 1
@@ -1254,8 +1259,80 @@ class MainWindow(tk.Frame):
         
         # обновим GUI
         self._reload_ledger()
-        self._reload_calculations()
+        self._insert_calc_row(rec)
         self.status_var.set("Toiming lisatud.")
+
+    def _insert_calc_row(self, rec):
+        """Добавить одну запись в таблицу 'Расчёты' без полного перезагрузки."""
+        tree = getattr(self, "calc_tree", None)
+        if not tree or not tree.winfo_exists():
+            return
+        if not hasattr(self, "_calc_iid_to_uid"):
+            self._calc_iid_to_uid = {}
+        from datetime import datetime as _dt
+        # построить отображаемые значения как в _reload_calculations
+        def _parse_eff_display(r):
+            eff = r.get("effective_date")
+            if eff:
+                try:
+                    return _dt.datetime.strptime(eff, "%d%m%y").date()
+                except Exception:
+                    pass
+            ts = r.get("ts")
+            if ts:
+                try:
+                    return _dt.fromisoformat(ts).date()
+                except Exception:
+                    pass
+            return None
+
+        d = _parse_eff_display(rec)
+        if not d:
+            return
+        typ_raw = (rec.get("type") or "").lower()
+        if typ_raw == "manual_add":
+            op = "ADD"
+        elif typ_raw == "manual_sub":
+            op = "SUB"
+        elif typ_raw == "manual_set":
+            op = "SET"
+        elif typ_raw in ("month_calc", "calc_deduct"):
+            op = "Arvestatud"
+        else:
+            op = typ_raw.upper() if typ_raw else ""
+
+        period = rec.get("period") or ""
+        if typ_raw == "month_calc":
+            period = rec.get("month") or f"{d.year}-{d.month:02d}"
+            pf = rec.get("period_from")
+            pt = rec.get("period_to")
+            if pf or pt:
+                period = f"{pf or ''} — {pt or ''}"
+        if typ_raw == "calc_deduct":
+            pf = rec.get("period_from")
+            pt = rec.get("period_to")
+            if pf or pt:
+                period = f"{pf or ''} — {pt or ''}"
+            else:
+                months = rec.get("months_covered") or []
+                if months:
+                    period = f"{months[0]}…{months[-1]}"
+
+        # вставляем в конец; для простоты без сортировки
+        iid = f"{d.isoformat()}-{uuid.uuid4()}"
+        self._calc_iid_to_uid[iid] = rec.get("uid")
+        tree.insert("", "end", iid=iid, values=(
+            d.isoformat(),
+            rec.get("material", ""),
+            op,
+            rec.get("amount_m2", ""),
+            period,
+        ), tags=((typ_raw,) if typ_raw else ()))
+        tree.tag_configure("manual_add", foreground="#0A7D00")
+        tree.tag_configure("manual_sub", foreground="#A40000")
+        tree.tag_configure("manual_set", foreground="#6A1B9A")
+        tree.tag_configure("month_calc", foreground="#004A9F")
+        tree.tag_configure("calc_deduct", foreground="#004A9F")
 
     def _delete_month_calc(self):
         """Удалить все записи type=month_calc за выбранный месяц и пересчитать остатки."""
@@ -1773,6 +1850,10 @@ class MainWindow(tk.Frame):
 
             valge = _get("POM Valge")
             must  = _get("POM Must")
+            if not self.deduct_flags["POM Valge"].get():
+                valge = Decimal("0")
+            if not self.deduct_flags["POM Must"].get():
+                must = Decimal("0")
 
             # если конвертация дала 0, попробуем взять фактическое списание из ledger по effective_date
             if valge == 0 and must == 0:
@@ -1806,7 +1887,8 @@ class MainWindow(tk.Frame):
                     return
                 data["ledger"].append({
                     "ts": ts_now,
-                "effective_date": datetime.now().strftime("%d%m%y"),
+                    "uid": str(uuid.uuid4()),
+                    "effective_date": datetime.now().strftime("%d%m%y"),
                     "period_from": months_covered[0],
                     "period_to": months_covered[-1],
                     "months_covered": months_covered,
@@ -1831,6 +1913,10 @@ class MainWindow(tk.Frame):
 
         valge = _get("POM Valge")
         must  = _get("POM Must")
+        if not self.deduct_flags["POM Valge"].get():
+            valge = Decimal("0")
+        if not self.deduct_flags["POM Must"].get():
+            must = Decimal("0")
 
         # Если оба нули — предупредим и выйдем
         if valge == 0 and must == 0:
@@ -1844,6 +1930,7 @@ class MainWindow(tk.Frame):
         if valge > 0:
             data["ledger"].append({
                 "ts": ts_now,
+                "uid": str(uuid.uuid4()),
                 "month": mkey,
                 "material": "POM Valge",
                 "type": "month_calc",
@@ -1854,6 +1941,7 @@ class MainWindow(tk.Frame):
         if must > 0:
             data["ledger"].append({
                 "ts": ts_now,
+                "uid": str(uuid.uuid4()),
                 "month": mkey,
                 "material": "POM Must",
                 "type": "month_calc",
