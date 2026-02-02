@@ -203,8 +203,8 @@ class MainWindow(tk.Frame):
         self.mat_tree.grid(row=1, column=0, sticky="nsew", padx=(8, 0), pady=8)
         mat_scroll.grid(row=1, column=1, sticky="ns", pady=8)
 
-        # --- Таблица "Расчёты" с фильтром по effective_date ---
-        calc_frame = ttk.LabelFrame(container, text="Расчёты")
+        # --- Таблица "Arvestused" с фильтром по effective_date ---
+        calc_frame = ttk.LabelFrame(container, text="Arvestused")
         calc_frame.grid(row=6, column=0, columnspan=3, sticky="nsew", pady=(12, 0))
         container.rowconfigure(6, weight=1)
         calc_frame.columnconfigure(0, weight=1)
@@ -402,7 +402,7 @@ class MainWindow(tk.Frame):
 
     # Архивация временно отключена
     def _open_archive_viewer(self):
-        messagebox.showinfo("Archive", "Архивация отключена в отладочном режиме.")
+        messagebox.showinfo("Arhiiv", "Arhiiv on ajutiselt välja lülitatud debug-režiimis.")
 
     def _choose_pdf_dir(self):
         initial = self.pdf_dir_var.get() or (self.state_dir / "input_pdf").as_posix()
@@ -1437,7 +1437,7 @@ class MainWindow(tk.Frame):
                                 f"Kirje tühistamine:\n"
                                 f"Materjal: {material}\n"
                                 f"Toiming: {pretty_action}\n"
-                                f"Объём: {amount} m²\n\n"
+                                f"Maht: {amount} m²\n\n"
                                 f"Luua vastupidine korrigeerimine."):
             return
 
@@ -1472,7 +1472,7 @@ class MainWindow(tk.Frame):
             ledger = data.get("ledger", []) or []
         except Exception as e:
             ledger = []
-            self.status_var.set(f"Viga чтения JSON: {e}")
+            self.status_var.set(f"JSON lugemise viga: {e}")
         # Маппинг iid -> «сырые» значения для undo
         self._ledger_index = {}
         
@@ -1788,7 +1788,7 @@ class MainWindow(tk.Frame):
     def _calc_delete_selected(self):
         sel = self._calc_get_selected()
         if not sel:
-            messagebox.showwarning("Valik", "Valige kirje tabelist 'Расчёты'.")
+            messagebox.showwarning("Valik", "Valige kirje tabelist 'Arvestused'.")
             return
         iid, vals = sel
         data = self._load_stock_data()
@@ -1820,7 +1820,7 @@ class MainWindow(tk.Frame):
     def _calc_edit_selected(self):
         sel = self._calc_get_selected()
         if not sel:
-            messagebox.showwarning("Valik", "Valige kirje tabelist 'Расчёты'.")
+            messagebox.showwarning("Valik", "Valige kirje tabelist 'Arvestused'.")
             return
         iid, vals = sel
         eff_date, material, op, qty, period = vals
@@ -1908,7 +1908,7 @@ class MainWindow(tk.Frame):
             locked = self._compute_locked_months()
             overlap = [m for m in months_covered if m in locked]
             if overlap:
-                messagebox.showerror("Lukus", f"Perioод kattub lukustatud kuudega: {', '.join(overlap)}")
+                messagebox.showerror("Lukus", f"Periood kattub lukustatud kuudega: {', '.join(overlap)}")
                 return
 
             # суммы берём из conv_totals (пока агрегат)
