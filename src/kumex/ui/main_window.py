@@ -100,8 +100,11 @@ class MainWindow(tk.Frame):
         self._m2_used_totals = {name: Decimal("0.00") for name in self.materials_cfg.keys()}
         # Отходы по ширине (м²)
         self._calc_iid_to_uid = {}
+        self._calc_uid_cache = {}
         # Флаги списания по материалам (Arvuta)
         self.deduct_flags = {name: tk.BooleanVar(value=True) for name in self.materials_cfg.keys()}
+        # Сортировки таблицы расчётов
+        self._calc_sort_reverse = {}
 
 
         # --- переменные GUI ---
@@ -119,6 +122,10 @@ class MainWindow(tk.Frame):
         
         # --- построение интерфейса ---
         self._build_ui()
+        # показать сохранённые данные при старте
+        self._reload_ledger()
+        self._reload_calculations()
+        self._update_calc_button_state()
 
         # --- обработчик закрытия: сохранить конфиг ---
         self.master.protocol("WM_DELETE_WINDOW", self._on_exit)
@@ -207,7 +214,7 @@ class MainWindow(tk.Frame):
         self.calc_tree.heading("material", text="Material")
         self.calc_tree.heading("op", text="Operation")
         self.calc_tree.heading("qty", text="m²")
-        self.calc_tree.heading("period", text="Period")
+        self.calc_tree.heading("period", text="Period", command=lambda: self._sort_calc_tree("period"))
         self.calc_tree.column("eff_date", width=110, anchor="center")
         self.calc_tree.column("material", width=120, anchor="w")
         self.calc_tree.column("op", width=90, anchor="center")
@@ -1269,6 +1276,8 @@ class MainWindow(tk.Frame):
             return
         if not hasattr(self, "_calc_iid_to_uid"):
             self._calc_iid_to_uid = {}
+        if not hasattr(self, "_calc_uid_cache"):
+            self._calc_uid_cache = {}
         from datetime import datetime as _dt
         # построить отображаемые значения как в _reload_calculations
         def _parse_eff_display(r):
@@ -1321,6 +1330,8 @@ class MainWindow(tk.Frame):
         # вставляем в конец; для простоты без сортировки
         iid = f"{d.isoformat()}-{uuid.uuid4()}"
         self._calc_iid_to_uid[iid] = rec.get("uid")
+        if rec.get("uid"):
+            self._calc_uid_cache[rec["uid"]] = rec
         tree.insert("", "end", iid=iid, values=(
             d.isoformat(),
             rec.get("material", ""),
@@ -1333,6 +1344,61 @@ class MainWindow(tk.Frame):
         tree.tag_configure("manual_set", foreground="#6A1B9A")
         tree.tag_configure("month_calc", foreground="#004A9F")
         tree.tag_configure("calc_deduct", foreground="#004A9F")
+
+    def _sort_calc_tree(self, col, reverse=None):
+        tree = getattr(self, "calc_tree", None)
+        if not tree or not tree.winfo_exists():
+            return
+        if reverse is None:
+            prev = self._calc_sort_reverse.get(col, False)
+            reverse = not prev
+            self._calc_sort_reverse[col] = reverse
+
+        def _period_key(val):
+            import re as _re
+            if not val:
+                return ("", "")
+            m = _re.search(r"\d{4}-\d{2}", val)
+            if m:
+                return (m.group(0), val)
+            m = _re.search(r"\d{2}\.\d{2}\.\d{4}", val)
+            if m:
+                # convert dd.mm.yyyy
+                parts = m.group(0).split(".")
+                return (f"{parts[2]}-{parts[1]}", val)
+            return (val, val)
+
+        def _priority(uid):
+            rec = self._calc_uid_cache.get(uid)
+            typ = (rec.get("type") if rec else "") or ""
+            if typ == "manual_add":
+                return 0
+            if typ == "manual_set":
+                return 1
+            if typ == "manual_sub":
+                return 2
+            # остальные (списание авто/период)
+            return 3
+
+        def _key(iid):
+            vals = tree.item(iid, "values")
+            columns = tree["columns"]
+            try:
+                idx = columns.index(col)
+                v = vals[idx]
+            except Exception:
+                v = ""
+            if col == "period":
+                uid = self._calc_iid_to_uid.get(iid)
+                return (_period_key(v), _priority(uid))
+            return v
+
+        items = list(tree.get_children(""))
+        items.sort(key=_key, reverse=reverse)
+        for pos, iid in enumerate(items):
+            tree.move(iid, "", pos)
+        # toggle command to invert next time
+        tree.heading(col, command=lambda: self._sort_calc_tree(col, not reverse))
 
     def _delete_month_calc(self):
         """Удалить все записи type=month_calc за выбранный месяц и пересчитать остатки."""
@@ -1586,6 +1652,7 @@ class MainWindow(tk.Frame):
         if not tree or not tree.winfo_exists():
             return
         self._calc_iid_to_uid = {}
+        self._calc_uid_cache = {}
         for iid in tree.get_children():
             tree.delete(iid)
 
@@ -1610,17 +1677,16 @@ class MainWindow(tk.Frame):
                     pass
             return None
 
-        mat_order = {"POM Valge": 0, "POM Must": 1}
         rows = []
-        for rec in ledger:
+        for idx, rec in enumerate(ledger):
             d = _parse_eff(rec)
             if not d:
                 continue
-            rows.append((d, rec))
+            rows.append((d, idx, rec))
 
-        rows.sort(key=lambda x: (x[0], mat_order.get(x[1].get("material",""), 99), x[1].get("material","")))
+        rows.sort(key=lambda x: (x[0], x[1]))  # по дате, внутри даты — в порядке добавления в ledger
 
-        for idx, (d, rec) in enumerate(rows):
+        for idx, (d, _, rec) in enumerate(rows):
             typ_raw = (rec.get("type") or "").lower()
             if typ_raw == "manual_add":
                 op = "ADD"
@@ -1654,6 +1720,8 @@ class MainWindow(tk.Frame):
                         period = f"{months[0]}…{months[-1]}"
             iid = f"{d.isoformat()}-{idx}"
             self._calc_iid_to_uid[iid] = rec.get("uid")
+            if rec.get("uid"):
+                self._calc_uid_cache[rec["uid"]] = rec
             tree.insert(
                 "", "end", iid=iid,
                 values=(
